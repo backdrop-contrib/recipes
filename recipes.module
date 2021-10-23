@@ -4,3 +4,30 @@
  * Provides an admin interface for managing recipes.
  */
 
+/**
+ * Implements hook_menu().
+ */
+function recipes_menu() {
+  $items['admin/structure/recipes'] = array(
+    'title' => 'Recipes',
+    'page callback' => 'backdrop_get_form',
+    'page arguments' => array('recipes_admin'),
+    'access arguments' => array('administer recipes'),
+    'type' => MENU_NORMAL_ITEM,
+    'file' => 'recipes.admin.inc',
+  );
+
+  return $items;
+}
+
+/**
+ * Implements hook_permission().
+ */
+function recipes_permission() {
+  return array(
+    'administer recipes' =>  array(
+      'title' => t('Administer recipes'),
+      'description' => t('Access the recipes overview page.'),
+    ),
+  );
+}
