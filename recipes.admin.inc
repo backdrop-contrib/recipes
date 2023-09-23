@@ -204,7 +204,7 @@ function _recipes_build_row($info, $extra) {
   // If this module is compatible, present a checkbox indicating this module
   // may be installed. Otherwise, show a big red X.
   if ($compatible) {
-    $operations = array('import', 'revert', 'inspect', 'export');
+    $operations = array('import', 'revert', 'inspect', 'export', 'remove');
   }
   else {
     $operations = array('inspect');
@@ -252,14 +252,24 @@ function recipes_import($info) {
  * @param $module
  *   Machine name of the recipe module.
  */
-function recipes_revert($module) {
-  $replacements = array('%recipe' => $module);
-  $message = t("Are you sure you want to revert the %recipe recipe to it's default state?", $replacements);
-  $form = array();
+function recipes_revert($info) {
+  $module = $info['project'];
+  $name = $info['name'];
+
   $form['recipe'] = array(
     '#type' => 'value',
     '#value' => $module,
   );
+
+  $markup = _recipes_list_config_files($info);
+  $form['configuration'] = array(
+    '#type' => 'markup',
+    '#markup' => $markup,
+  );
+
+  $replacements = array('%recipe' => trim(str_replace('Recipe', '', $name)));
+  $message = t("Are you sure you want to revert the %recipe recipe to it's default state?", $replacements);
+
   return confirm_form($form, $message, 'admin/structure/recipes', '', t('Revert recipe'), t('Cancel'));
 }
 
@@ -276,14 +286,24 @@ function recipes_revert_submit($module) {
  * @param $module
  *   Machine name of the recipe module.
  */
-function recipes_export($module) {
-  $items = array('todo');
-  $replacements = array('!config' => theme('item_list', array('items' => $items)));
-  $message = t('Are you sure you want to extract the following configuration files?<br>!config', $replacements);
+function recipes_export($info) {
+  $module = $info['project'];
+  $name = $info['name'];
+
   $form['recipe'] = array(
     '#type' => 'value',
     '#value' => $module,
   );
+
+  $markup = _recipes_list_config_files($info);
+  $form['configuration'] = array(
+    '#type' => 'markup',
+    '#markup' => $markup,
+  );
+
+  $replacements = array('%recipe' => $name);
+  $message = t('Are you sure you want to export the configuration files for %recipe?', $replacements);
+
   return confirm_form($form, $message, 'admin/structure/recipes', '', t('Extract recipe'), t('Cancel'));
 }
 
@@ -293,8 +313,54 @@ function recipes_export($module) {
  * @param $module
  *   Machine name of the recipe module.
  */
-function recipes_inspect($module) {
-  $output = t('This is a page where you can inspect the recipe.');
-  return $output;
+function recipes_inspect($info) {
+  $module = $info['project'];
+  $name = $info['name'];
+
+  $markup = _recipes_list_config_files($info);
+
+  return $markup;
 }
 
+/**
+ * Menu callback: ALlows a recipe to be un-applied.
+ *
+ * @param $module
+ *   Machine name of the recipe module.
+ */
+function recipes_remove($info) {
+  $module = $info['project'];
+  $name = $info['name'];
+
+  $form['recipe'] = array(
+    '#type' => 'value',
+    '#value' => $module,
+  );
+
+  $markup = _recipes_list_config_files($info);
+  $form['configuration'] = array(
+    '#type' => 'markup',
+    '#markup' => $markup,
+  );
+
+  $replacements = array('%recipe' => $name);
+  $message = t('Are you sure you want to remove the configuration files for %recipe?', $replacements);
+
+  return confirm_form($form, $message, 'admin/structure/recipes', '', t('Remove recipe'), t('Cancel'));
+}
+
+/**
+ * Helper function: generate a list of config files contained in a recipe.
+ */
+function _recipes_list_config_files($info) {
+  $module = $info['project'];
+  $name = $info['name'];
+
+  $replacements = array('%recipe' => $name);
+  $markup = t('The %recipe recipe contains the following configuration files:', $replacements);
+
+  $items = array('todo');
+  $markup .= theme('item_list', array('items' => $items));
+
+  return $markup;
+}

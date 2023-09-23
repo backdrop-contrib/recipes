@@ -25,17 +25,17 @@ function recipes_menu() {
     'type' => MENU_CALLBACK,
     'file' => 'recipes.admin.inc',
   );
-  $items['admin/structure/recipes/revert/%recipe'] = array(
-    'title' => 'Revert Recipe',
-    'page callback' => 'recipes_revert',
+  $items['admin/structure/recipes/export/%recipe'] = array(
+    'title' => 'Export Recipe',
+    'page callback' => 'recipes_export',
     'page arguments' => array(4),
     'access arguments' => array('manage recipes'),
     'type' => MENU_CALLBACK,
     'file' => 'recipes.admin.inc',
   );
-  $items['admin/structure/recipes/export/%recipe'] = array(
-    'title' => 'Export Recipe',
-    'page callback' => 'recipes_export',
+  $items['admin/structure/recipes/revert/%recipe'] = array(
+    'title' => 'Revert Recipe',
+    'page callback' => 'recipes_revert',
     'page arguments' => array(4),
     'access arguments' => array('manage recipes'),
     'type' => MENU_CALLBACK,
@@ -45,7 +45,15 @@ function recipes_menu() {
     'title' => 'Inspect Recipe',
     'page callback' => 'recipes_inspect',
     'page arguments' => array(4),
-    'access arguments' => array('inspect recipes'),
+    'access arguments' => array('manage recipes'),
+    'type' => MENU_CALLBACK,
+    'file' => 'recipes.admin.inc',
+  );
+  $items['admin/structure/recipes/remove/%recipe'] = array(
+    'title' => 'Remove Recipe',
+    'page callback' => 'recipes_remove',
+    'page arguments' => array(4),
+    'access arguments' => array('manage recipes'),
     'type' => MENU_CALLBACK,
     'file' => 'recipes.admin.inc',
   );
@@ -53,6 +61,9 @@ function recipes_menu() {
   return $items;
 }
 
+/**
+ * Magic loader: Loads recipe information.
+ */
 function recipe_load($project) {
   $modules = system_rebuild_module_data();
   return array(
