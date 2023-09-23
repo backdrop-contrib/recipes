@@ -1,8 +1,10 @@
+type = module
 name = Recipes
 description = A module for managing collections of configuration files.
-package = Recipes
 backdrop = 1.x
 
+;package = Recipes
+
 configure = admin/structure/recipes
-type = module
+
 

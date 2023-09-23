@@ -7,123 +7,294 @@
 /**
  * Implements hook_menu().
  */
-function recipes_admin($form, &$form_state) {
-  $form = array('#config' => 'recipes.settings');
+function recipes_admin($form, &$form_state = array()) {
+  backdrop_set_title('Recipes');
 
-  $form['help'] = array(
-    '#type' => 'help',
-    '#markup' => t('The following modules are packages of configuration.'),
-  );
+  // Get current list of modules.
+  $files = system_rebuild_module_data();
 
-  // Pull from cache, if available.
-  $cache = cache_get('recipes:recipes_list');
-  if (FALSE && $cache) {
-    $projects = $cache->data;
-  }
-  else {
-    $projects = system_rebuild_module_data();
-  }
-
-  $rows = array();
-  foreach ($projects as $machine => $module) {
-    if (isset($module->info['package']) && $module->info['package'] == 'Recipes') {
-      $cacheme[$machine] = $module;
-
-      //dpm($module);
-
-      $row = array();
-      $name = theme('label_machine_name', array(
-        'label' => $module->info['name'],
-        'machine_name' => $machine,
-      ));
-
-      $ops = array();
-
-      // Add the Enable recipe link, first, if the project is not enabled.
-      if (!$module->status) {
-        $ops['enable'] = array('title' => t('Enable'), 'href' => '');
-      }
-
-      $ops['revert'] = array('title' => t('Revert'), 'href' => '');
-      $ops['recreate'] = array('title' => t('Recreate'), 'href' => '');
-
-      // Add the Remove recipe link, last, if the project is enabled.
-      if ($module->status) {
-        $ops['remove'] = array('title' => t('Remove'), 'href' => '');
-      }
-
-      $links = array(
-        '#type' => 'dropbutton',
-        '#links' => $ops,
-      );
-
-      $row = array();
-      //$row[] = array('data' => '[ ]'); // @todo
-      $row[] = array('data' => $name);
-      $row[] = array('data' => $module->info['version']);
-      $row[] = array('data' => $module->info['description']);
-      $row[] = array('data' => $module->info['dependencies']);
-      $row[] = array('data' => $links);
-      $rows[] = $row;
+  $visible_files = $files;
+  foreach ($visible_files as $filename => $file) {
+    // Remove non-recipes from the list.
+    if (!isset($file->info['package']) || $file->info['package'] != 'Recipes') {
+      unset($visible_files[$filename]);
     }
   }
 
-  // Set the cache, if it was empty.
-  if (!$cache) {
-    cache_set('recipes:recipes_list', $cacheme);
+  $modules = array();
+  $form['modules'] = array('#tree' => TRUE);
+
+  // Used when displaying modules that are required by the installation profile.
+  require_once BACKDROP_ROOT . '/core/includes/install.inc';
+  $distribution_name = check_plain(backdrop_install_profile_distribution_name());
+
+  // Iterate through each of the modules.
+  foreach ($visible_files as $filename => $module) {
+    $extra = array();
+    $extra['enabled'] = (bool) $module->status;
+    $extra['disabled'] = (array_key_exists('disabled', $module->info)) ? $module->info['disabled'] : FALSE;
+    if ($extra['disabled'] && !empty($module->info['explanation'])) {
+      $extra['required_by'][] = $module->info['explanation'];
+    }
+
+    // Check to see if this is a core module.
+    if (strstr($module->uri, 'core/modules')) {
+      $extra['core'] = TRUE;
+    }
+
+    // Some modules are always required by core and cannot be disabled, for
+    // example: entity, node, system, and user.
+    $extra['required_by_distribution'] = FALSE;
+    if (!empty($module->info['required'])) {
+      $extra['disabled'] = TRUE;
+      $extra['required_by'][] = $distribution_name . (!empty($module->info['explanation']) ? ' (' . $module->info['explanation'] . ')' : '');
+      $extra['required_by_distribution'] = TRUE;
+    }
+
+    // If this module requires other modules, add them to the array.
+    foreach ($module->requires as $requires => $v) {
+      if (!isset($files[$requires])) {
+        $extra['requires'][$requires] = t('@module (<span class="admin-missing">missing</span>)', array('@module' => backdrop_ucfirst($requires)));
+        $extra['disabled'] = TRUE;
+      }
+      // Only display visible modules.
+      elseif (isset($visible_files[$requires])) {
+        $requires_name = $files[$requires]->info['name'];
+
+        // Disable this module if it is incompatible with the dependency's version.
+        $version_string = FALSE;
+        // Make sure the version string of the dependency is available.
+        if (!empty($files[$requires]->info['version'])) {
+          $version_string = preg_replace('/^' . preg_quote(BACKDROP_CORE_COMPATIBILITY, '/') . '-/', '', $files[$requires]->info['version']);
+        }
+        if ($version_string && $incompatible_version = backdrop_check_incompatibility($v, $version_string)) {
+          $extra['requires'][$requires] = t('@module (<span class="admin-missing">incompatible with</span> version @version)', array(
+            '@module' => $requires_name . ' ' . $incompatible_version,
+            '@version' => $version_string,
+          ));
+          $extra['disabled'] = TRUE;
+        }
+
+        // Disable this module if the dependency is incompatible with this version of Backdrop core.
+        elseif (isset($files[$requires]->info['backdrop']) && $files[$requires]->info['backdrop'] != BACKDROP_CORE_COMPATIBILITY) {
+          $extra['requires'][$requires] = t('@module (<span class="admin-missing">incompatible with</span> this version of Backdrop core)', array(
+            '@module' => $requires_name,
+          ));
+          $extra['disabled'] = TRUE;
+        }
+        elseif ($files[$requires]->status) {
+          $extra['requires'][$requires] = t('@module (<span class="admin-enabled">enabled</span>)', array('@module' => $requires_name));
+        }
+        else {
+          $extra['requires'][$requires] = t('@module (<span class="admin-disabled">disabled</span>)', array('@module' => $requires_name));
+        }
+      }
+    }
+
+    // If this module is required by other modules, list those, and then make it
+    // impossible to disable this one.
+    foreach ($module->required_by as $required_by => $v) {
+      // Hidden modules are unset already.
+      if (isset($visible_files[$required_by])) {
+        if ($files[$required_by]->status == 1 && $module->status == 1) {
+          $extra['required_by'][] = t('@module (<span class="admin-enabled">enabled</span>)', array('@module' => $files[$required_by]->info['name']));
+          $extra['disabled'] = TRUE;
+        }
+        else {
+          $extra['required_by'][] = t('@module (<span class="admin-disabled">disabled</span>)', array('@module' => $files[$required_by]->info['name']));
+        }
+      }
+    }
+    $form['modules'][$module->info['package']][$filename] = _recipes_build_row($module->info, $extra);
   }
 
-  if (empty($rows)) {
-    $empty_text = t('No recipes found. Check that <code>package = recipe</code> exists in the .info file.');
-    $rows[] = array(
-      array('data' => $empty_text, 'colspan' => 2),
+  // Add basic information to the fieldsets.
+  foreach (element_children($form['modules']) as $package) {
+    $form['modules'][$package] += array(
+      '#type' => 'fieldset',
+      '#title' => t($package),
+      '#theme' => 'recipe_fieldset',
+      '#header' => array(
+        t('Name'),
+        array('data' => t('Version'), 'class' => array(RESPONSIVE_PRIORITY_MEDIUM)),
+        array('data' => t('Description'), 'class' => array(RESPONSIVE_PRIORITY_LOW)),
+        array('data' => t('Requirements'), 'class' => array(RESPONSIVE_PRIORITY_LOW)),
+        array('data' => t('Operations')),
+      ),
     );
   }
-
-  $header = array(
-    //array('data' => '<span class="element-invisible">' . t('Enabled') . '</span>'),
-    array('data' => t('Recipe Name')),
-    array('data' => t('Version')),
-    array('data' => t('Description')),
-    array('data' => t('Dependencies')),
-    array('data' => t('Operations')),
-  );
-
-  $form['table'] = array(
-    '#type' => 'table',
-    '#header' => $header,
-    '#rows' => $rows,
-    '#attributes' => array(
-      'class' => array('recipe-admin-table'),
-    ),
-  );
-
-  $table = theme('table', array(
-    'header' => $header,
-    'rows' => $rows,
-  ));
-
-  $form['table'] = array(
-    '#type' => 'markup',
-    '#markup' => $table,
-  );
-
-/*
-  $form['actions'] = array(
-    '#type' => 'actions',
-  );
-  $form['actions']['submit'] = array(
-    '#type' => 'submit',
-    '#value' => t('Enable Recipe'),
-  );
-*/
+  ksort($form['modules']);
 
   return $form;
 }
 
-/**
- * Submit handler for admin listing form.
- */
-function recipes_admin_submit(&$form, &$form_state) {
-  backdrop_set_message('@todo!');
+function _recipes_build_row($info, $extra) {
+  // Prepare the tag list by ensuring all tags are lower case.
+  $tags = array();
+  if (isset($info['tags'])) {
+    foreach ($info['tags'] as $tag) {
+      $tags[] = check_plain($tag);
+    }
+  }
+  if (isset($info['package'])) {
+    $tags[] = check_plain($info['package']);
+  }
+  if (empty($tags)) {
+    $tags[] = 'Other';
+  }
+
+  // Add in the defaults.
+  $extra += array(
+    'requires' => array(),
+    'required_by' => array(),
+    'disabled' => FALSE,
+    'enabled' => FALSE,
+    'links' => array(),
+    'core' => FALSE,
+  );
+  $form = array(
+    '#tree' => TRUE,
+  );
+  // Set the basic properties.
+  $form['name'] = array(
+    '#markup' => $info['name'],
+  );
+  $form['description'] = array(
+    '#markup' => t($info['description']),
+  );
+  $form['version'] = array(
+    '#markup' => $info['version'],
+  );
+  $form['tags'] = array(
+    '#markup' => implode(', ', $tags),
+  );
+
+  $form['#requires'] = $extra['requires'];
+  $form['#required_by'] = $extra['required_by'];
+  $form['#required_by_distribution'] = $extra['required_by_distribution'];
+  if (!empty($info['project'])) {
+    $form['#project'] = $info['project'];
+  }
+
+  // Check the compatibilities.
+  $compatible = TRUE;
+  $status_short = '';
+  $status_long = '';
+
+  // Check the core compatibility.
+  if (!isset($info['backdrop']) || $info['backdrop'] != BACKDROP_CORE_COMPATIBILITY) {
+    $compatible = FALSE;
+    $status_short .= t('Incompatible with Backdrop CMS !core_version.', array('!core_version' => BACKDROP_CORE_COMPATIBILITY)) . ' ';
+    $status_long .= t('This version is not compatible with Backdrop CMS !core_version.', array('!core_version' => BACKDROP_CORE_COMPATIBILITY)) . ' ';
+  }
+
+  // Ensure this module is compatible with the currently installed version of PHP.
+  if (version_compare(phpversion(), $info['php']) < 0) {
+    $compatible = FALSE;
+    $status_short .= t('Incompatible with this version of PHP') . ' ';
+    $php_required = $info['php'];
+    if (substr_count($info['php'], '.') < 2) {
+      $php_required .= '.*';
+    }
+    $status_long .= t('This module requires PHP version @php_required and is incompatible with PHP version !php_version.', array('@php_required' => $php_required, '!php_version' => phpversion())) . ' ';
+  }
+
+
+
+  // If this module is compatible, present a checkbox indicating this module
+  // may be installed. Otherwise, show a big red X.
+  if ($compatible) {
+    $operations = array('import', 'revert', 'inspect', 'export');
+  }
+  else {
+    $operations = array('inspect');
+    $form['description']['#markup'] .= theme('system_modules_incompatible', array('message' => trim($status_long)));
+  }
+
+  // Build dropbutton links.
+  $links = array();
+  foreach ($operations as $action) {
+    $links[$action] = array(
+      'title' => t(ucfirst($action)),
+      'href' => 'admin/structure/recipes/' . $action . '/' . $info['project'],
+    );
+  }
+  $form['links'] = array(
+    '#type' => 'dropbutton',
+    '#links' => $links,
+  );
+
+  return $form;
 }
+
+
+/**
+ * Menu callback: Applies a recipe to a site by installing as a module.
+ *
+ * @param $module
+ *   Machine name of the recipe module.
+ */
+function recipes_import($info) {
+  $module_list = array($info['project']);
+
+  module_enable($module_list);
+  module_disable($module_list);
+
+  $replacements = array('%recipe' => trim(str_replace('Recipe', '', $info['name'])));
+  backdrop_set_message(t('The %recipe Recipe has been applied to this site.', $replacements));
+
+  backdrop_goto('admin/structure/recipes');
+}
+
+/**
+ * Menu callback: Reverts the config included in a recipe back to the state provided by the recipe.
+ *
+ * @param $module
+ *   Machine name of the recipe module.
+ */
+function recipes_revert($module) {
+  $replacements = array('%recipe' => $module);
+  $message = t("Are you sure you want to revert the %recipe recipe to it's default state?", $replacements);
+  $form = array();
+  $form['recipe'] = array(
+    '#type' => 'value',
+    '#value' => $module,
+  );
+  return confirm_form($form, $message, 'admin/structure/recipes', '', t('Revert recipe'), t('Cancel'));
+}
+
+/**
+ * Submit handler for revert confirm form.
+ */
+function recipes_revert_submit($module) {
+  recipes_import($module);
+}
+
+/**
+ * Menu callback: extracts the config included in a recipe.
+ *
+ * @param $module
+ *   Machine name of the recipe module.
+ */
+function recipes_export($module) {
+  $items = array('todo');
+  $replacements = array('!config' => theme('item_list', array('items' => $items)));
+  $message = t('Are you sure you want to extract the following configuration files?<br>!config', $replacements);
+  $form['recipe'] = array(
+    '#type' => 'value',
+    '#value' => $module,
+  );
+  return confirm_form($form, $message, 'admin/structure/recipes', '', t('Extract recipe'), t('Cancel'));
+}
+
+/**
+ * Menu callback: Shows the contents of a recipe.
+ *
+ * @param $module
+ *   Machine name of the recipe module.
+ */
+function recipes_inspect($module) {
+  $output = t('This is a page where you can inspect the recipe.');
+  return $output;
+}
+
