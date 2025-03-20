@@ -5,74 +5,6 @@
  */
 
 /**
- * Implements hook_menu().
- */
-function recipes_menu() {
-  $items['admin/structure/recipes'] = array(
-    'title' => 'Recipes',
-    'page callback' => 'backdrop_get_form',
-    'page arguments' => array('recipes_admin'),
-    'access arguments' => array('manage recipes'),
-    'type' => MENU_NORMAL_ITEM,
-    'file' => 'recipes.admin.inc',
-  );
-
-  $items['admin/structure/recipes/import/%recipe'] = array(
-    'title' => 'Import Recipe',
-    'page callback' => 'recipes_import',
-    'page arguments' => array(4),
-    'access arguments' => array('manage recipes'),
-    'type' => MENU_CALLBACK,
-    'file' => 'recipes.admin.inc',
-  );
-  $items['admin/structure/recipes/export/%recipe'] = array(
-    'title' => 'Export Recipe',
-    'page callback' => 'recipes_export',
-    'page arguments' => array(4),
-    'access arguments' => array('manage recipes'),
-    'type' => MENU_CALLBACK,
-    'file' => 'recipes.admin.inc',
-  );
-  $items['admin/structure/recipes/revert/%recipe'] = array(
-    'title' => 'Revert Recipe',
-    'page callback' => 'recipes_revert',
-    'page arguments' => array(4),
-    'access arguments' => array('manage recipes'),
-    'type' => MENU_CALLBACK,
-    'file' => 'recipes.admin.inc',
-  );
-  $items['admin/structure/recipes/inspect/%recipe'] = array(
-    'title' => 'Inspect Recipe',
-    'page callback' => 'recipes_inspect',
-    'page arguments' => array(4),
-    'access arguments' => array('manage recipes'),
-    'type' => MENU_CALLBACK,
-    'file' => 'recipes.admin.inc',
-  );
-  $items['admin/structure/recipes/remove/%recipe'] = array(
-    'title' => 'Remove Recipe',
-    'page callback' => 'recipes_remove',
-    'page arguments' => array(4),
-    'access arguments' => array('manage recipes'),
-    'type' => MENU_CALLBACK,
-    'file' => 'recipes.admin.inc',
-  );
-
-  return $items;
-}
-
-/**
- * Magic loader: Loads recipe information.
- */
-function recipe_load($project) {
-  $modules = system_rebuild_module_data();
-  return array(
-    'project' => $project,
-    'name' => $modules[$project]->info['name'],
-  );
-}
-
-/**
  * Implements hook_permission().
  */
 function recipes_permission() {
@@ -87,6 +19,73 @@ function recipes_permission() {
       'restrict access' => TRUE,
       'warning' => t('People who can inspect recipes will also be able to delete individual config files.'),
     ),
+  );
+}
+
+/**
+ * Implements hook_menu().
+ */
+function recipes_menu() {
+  $items['admin/structure/recipes'] = array(
+    'title' => 'Recipes',
+    'page callback' => 'backdrop_get_form',
+    'page arguments' => array('recipes_admin'),
+    'access arguments' => array('manage recipes'),
+    'type' => MENU_NORMAL_ITEM,
+    'file' => 'recipes.admin.inc',
+  );
+  $items['admin/structure/recipes/%/%recipe'] = array(
+    'title' => 'Import Recipe',
+    'page callback' => 'recipes_action_execute',
+    'page arguments' => array(3, 4),
+    'access arguments' => array('manage recipes'),
+    'type' => MENU_CALLBACK,
+    'file' => 'recipes.admin.inc',
+  );
+
+  return $items;
+}
+
+/**
+ * Menu callback: Executes a single recipe action.
+ *
+ * @param string $action_key
+ *   The machine name of the action to be executed.
+ * @param string $module
+ *   The machine name of the module project to be acted upon.
+ *
+ * @return mixed
+ *   The result of the executed recipe action callback.
+ */
+function recipes_action_execute($action_key, $module = NULL) {
+  $action_info = recipes_actions_get_info($action_key);
+  $callback = $action_info['callback'];
+  if (isset($action_info['file'])) {
+    include_once BACKDROP_ROOT . '/' . backdrop_get_path('module', $action_info['module']) . '/' . $action_info['file'];
+  }
+  if (function_exists($callback)) {
+    $result = $callback($module);
+  }
+  else {
+    $result = NULL;
+    trigger_error(t('The action "@action" could not be executed because the function "@callback" could not be found.', array('@action' => $action_key, '@callback' => $callback)), E_USER_ERROR);
+  }
+
+  if (empty($result)) {
+    backdrop_goto('admin/structure/recipes');
+  }
+
+  return $result;
+}
+
+/**
+ * Magic loader: Loads recipe information.
+ */
+function recipe_load($project) {
+  $modules = system_rebuild_module_data();
+  return array(
+    'project' => $project,
+    'name' => $modules[$project]->info['name'],
   );
 }
 
@@ -151,4 +150,123 @@ function theme_recipe_fieldset($variables) {
   }
 
   return theme('table', array('header' => $form['#header'], 'rows' => $rows));
+}
+
+/**
+ * Retrieves a single action's info by its name, or all actions
+ *
+ * @param (string) $action_key
+ *   The key of the recipe action to retrieve.
+ */
+function recipes_actions_get_info($action_key = NULL) {
+  $actions = &backdrop_static(__FUNCTION__);
+
+  if (!isset($actions)) {
+    $actions = array();
+    foreach (module_implements('recipes_action_info') as $module) {
+      $module_actions = module_invoke($module, 'recipes_action_info');
+      foreach ($module_actions as $module_action_name => $action_info) {
+        $action_info += array(
+          'callback' => $module_action_name,
+          'module' => $module,
+          'requirements_callback' => 'recipes_action_requirements',
+        );
+        $actions[$module_action_name] = $action_info;
+      }
+    }
+    backdrop_alter('recipes_action_info', $actions);
+    //backdrop_sort($actions);
+  }
+
+  if (!isset($action_key)) {
+    return $actions;
+  }
+  elseif (is_array($actions) && isset($actions[$action_key])) {
+    return $actions[$action_key];
+  }
+  else {
+    return FALSE;
+  }
+}
+
+/**
+ * Default requirements callback, always TRUE.
+ */
+function recipes_requirements() {
+  return TRUE;
+}
+
+/**
+ * Requirements callback: Requires the module to be enabled.
+ *
+ * @param string $module
+ *   Machine name of the recipe module this action is to be performed on.
+ *
+ * @return bool
+ */
+function recipes_requirements_module_enabled($module) {
+  if (module_exists($module)) {
+    return TRUE;
+  }
+  return FALSE;
+}
+
+/**
+ * Requirements callback: Requires the module to be disabled.
+ *
+ * @param string $module
+ *   Machine name of the recipe module this action is to be performed on.
+ *
+ * @return bool
+ */
+function recipes_requirements_module_disabled($module) {
+  if (module_exists($module)) {
+    return FALSE;
+  }
+  return TRUE;
+}
+
+/**
+ * Implements hook_recipes_action_info().
+ */
+function recipes_recipes_action_info() {
+  $operations = array(
+    'recipes_import' => array(
+      'label' => 'Apply recipe',
+      //'callback' => 'recipes_import_recipes_action',
+      'requirements_callback' => 'recipes_requirements_module_disabled',
+      'permissions' => array('manage recipes'),
+      'file' => 'recipes.actions.inc',
+    ),
+    'recipes_revert' => array(
+      'label' => 'Revert',
+      //'callback' => 'recipes_revert_recipes_action',
+      'requirements_callback' => 'recipes_requirements_module_enabled',
+      'permissions' => array('manage recipes'),
+      'file' => 'recipes.actions.inc',
+    ),
+    'recipes_inspect' => array(
+      'label' => t('Inspect'),
+      //'callback' => 'recipes_inspect_recipes_action',
+      'permissions' => array('manage recipes', 'inspect recipes'),
+      'file' => 'recipes.actions.inc',
+    ),
+    'recipes_remove' => array(
+      'label' => t('Remove'),
+      //'callback' => 'recipes_remove_recipes_action',
+      'requirements_callback' => 'recipes_requirements_module_enabled',
+      'permissions' => array('manage recipes'),
+      'file' => 'recipes.actions.inc',
+    ),
+    /*
+    'recipes_export' => array(
+      'label' => t('Export'),
+      //'callback' => 'recipes_export_recipes_action',
+      'requirements_callback' => 'recipes_requirements_module_enabled',
+      'permissions' => array('manage recipes'),
+      'file' => 'recipes.actions.inc',
+    ),
+    */
+  );
+  return $operations;
 }
