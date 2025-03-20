@@ -1,7 +1,33 @@
 Recipes
 ========
 
-Provides an administrative interface for managin recipes.
+Provides an administrative interface to manage recipe modules.
+
+Supported actions:
+- Apply recipe: Will import the configuration files from this recipe (equivilent to
+    'Enable' on the modules page).
+- Revert recipe: Will re-install the configuration files from this recipe, overwriting
+    any changes.
+- Inspect recipe: Will list all config files included in this recipe.
+- Remove recipe: Will remove all active config files originating from this recipe.
+- Export recipe: (Coming soon) Will re-export the current state of the configuratuion
+    files from this recipe, including any changes that have been made.
+
+
+## Developer notes:
+
+Include the following lines to your recipe module's .info file to have it appear
+on the recipies listing page (admin/structure/recipes):
+```
+type = module
+package = Recipes
+```
+
+To prevent the recipe from appearing on the modules lsting page (admin/modules),
+you may add the following line. It will still be visible on the Recipes page.
+```
+hidden = true
+```
 
 Installation
 ------------
