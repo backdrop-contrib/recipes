@@ -232,27 +232,27 @@ function recipes_requirements_module_disabled($module) {
 function recipes_recipes_action_info() {
   $operations = array(
     'recipes_import' => array(
-      'label' => 'Apply recipe',
+      'label' => 'Apply / Install',
       //'callback' => 'recipes_import_recipes_action',
       'requirements_callback' => 'recipes_requirements_module_disabled',
       'permissions' => array('manage recipes'),
       'file' => 'recipes.actions.inc',
     ),
+    'recipes_inspect' => array(
+      'label' => t('Inspect / View'),
+      //'callback' => 'recipes_inspect_recipes_action',
+      'permissions' => array('manage recipes', 'inspect recipes'),
+      'file' => 'recipes.actions.inc',
+    ),
     'recipes_revert' => array(
-      'label' => 'Revert',
+      'label' => 'Revert / Restore',
       //'callback' => 'recipes_revert_recipes_action',
       'requirements_callback' => 'recipes_requirements_module_enabled',
       'permissions' => array('manage recipes'),
       'file' => 'recipes.actions.inc',
     ),
-    'recipes_inspect' => array(
-      'label' => t('Inspect'),
-      //'callback' => 'recipes_inspect_recipes_action',
-      'permissions' => array('manage recipes', 'inspect recipes'),
-      'file' => 'recipes.actions.inc',
-    ),
     'recipes_remove' => array(
-      'label' => t('Remove'),
+      'label' => t('Remove / Uninstall'),
       //'callback' => 'recipes_remove_recipes_action',
       'requirements_callback' => 'recipes_requirements_module_enabled',
       'permissions' => array('manage recipes'),
@@ -260,7 +260,7 @@ function recipes_recipes_action_info() {
     ),
     /*
     'recipes_export' => array(
-      'label' => t('Export'),
+      'label' => t('Export recipe'),
       //'callback' => 'recipes_export_recipes_action',
       'requirements_callback' => 'recipes_requirements_module_enabled',
       'permissions' => array('manage recipes'),
