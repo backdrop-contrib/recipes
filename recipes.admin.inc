@@ -207,28 +207,26 @@ function _recipes_build_row($info, $extra) {
   // If this module is compatible, present a list of available operations.
   if ($compatible) {
     $actions = recipes_actions_get_info();
-    if (!empty($actions)) {
-      foreach ($actions as $action_key => $action_info) {
-        $requirements = TRUE;
-        $requirements_callback = $action_info['requirements_callback'];
-        if (function_exists($requirements_callback)) {
-          $requirements = $requirements_callback($info['project']);
-        }
-        if (!$requirements) {
-          continue;
-        }
-        if (!empty($action_info['permissions'])) {
-          foreach ($action_info['permissions'] as $permission) {
-            if (user_access($permission)) {
-              $operations[$action_key] = $action_info;
-            }
+    foreach ($actions as $action_key => $action_info) {
+      $requirements = TRUE;
+      $requirements_callback = $action_info['requirements_callback'];
+      if (function_exists($requirements_callback)) {
+        $requirements = $requirements_callback($info['project']);
+      }
+      if (!$requirements) {
+        continue;
+      }
+      if (!empty($action_info['permission'])) {
+        foreach ($action_info['permission'] as $permission) {
+          if (user_access($permission)) {
+            $operations[$action_key] = $action_info;
           }
         }
       }
     }
   }
   else {
-    $operations = array('inspect');
+    $operations = array();
     $form['description']['#markup'] .= theme('system_modules_incompatible',
       array('message' => trim($status_long)));
   }
@@ -236,9 +234,14 @@ function _recipes_build_row($info, $extra) {
   // Build dropbutton links.
   $links = array();
   foreach ($operations as $action_key => $action_info) {
+    $path = 'admin/structure/recipes/' . $action_key . '/' . $info['project'];
     $links[$action_key] = array(
       'title' => $action_info['label'],
-      'href' => 'admin/structure/recipes/' . $action_key . '/' . $info['project'],
+      'href' => $path,
+      'query' => array(
+        'destination' => 'admin/structure/recipes',
+        'token' => backdrop_get_token($path),
+      ),
     );
   }
   $form['links'] = array(

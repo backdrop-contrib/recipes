@@ -9,9 +9,13 @@
  */
 function recipes_permission() {
   return array(
+    'access recipes overview' =>  array(
+      'title' => t('Manage recipes'),
+      'description' => t('Access the recipes overview page.'),
+    ),
     'manage recipes' =>  array(
       'title' => t('Manage recipes'),
-      'description' => t('Access the recipes overview page, and import recpies.'),
+      'description' => t('Enable, Disable, and Revert recipes.'),
     ),
     'inspect recipes' =>  array(
       'title' => t('Inspect recipes'),
@@ -30,52 +34,26 @@ function recipes_menu() {
     'title' => 'Recipes',
     'page callback' => 'backdrop_get_form',
     'page arguments' => array('recipes_admin'),
-    'access arguments' => array('manage recipes'),
+    'access arguments' => array('access recipes overview'),
     'type' => MENU_NORMAL_ITEM,
     'file' => 'recipes.admin.inc',
   );
-  $items['admin/structure/recipes/%/%recipe'] = array(
-    'title' => 'Import Recipe',
-    'page callback' => 'recipes_action_execute',
-    'page arguments' => array(3, 4),
-    'access arguments' => array('manage recipes'),
-    'type' => MENU_CALLBACK,
-    'file' => 'recipes.admin.inc',
-  );
+
+  // Add a menu callback for each action.
+  $actions = recipes_actions_get_info();
+  foreach ($actions as $action_key => $action_info) {
+    $form_id = $action_info['callback'];
+    $items['admin/structure/recipes/' . $action_key . '/%recipe'] = array(
+      'title' => 'Recipes ' . $action_info['label'],
+      'page callback' => 'backdrop_get_form',
+      'page arguments' => array($form_id, 4),
+      'access arguments' => array($action_info['permission']),
+      'type' => MENU_NORMAL_ITEM,
+      'file' => $action_info['file'],
+    );
+  }
 
   return $items;
-}
-
-/**
- * Menu callback: Executes a single recipe action.
- *
- * @param string $action_key
- *   The machine name of the action to be executed.
- * @param string $module
- *   The machine name of the module project to be acted upon.
- *
- * @return mixed
- *   The result of the executed recipe action callback.
- */
-function recipes_action_execute($action_key, $module = NULL) {
-  $action_info = recipes_actions_get_info($action_key);
-  $callback = $action_info['callback'];
-  if (isset($action_info['file'])) {
-    include_once BACKDROP_ROOT . '/' . backdrop_get_path('module', $action_info['module']) . '/' . $action_info['file'];
-  }
-  if (function_exists($callback)) {
-    $result = $callback($module);
-  }
-  else {
-    $result = NULL;
-    trigger_error(t('The action "@action" could not be executed because the function "@callback" could not be found.', array('@action' => $action_key, '@callback' => $callback)), E_USER_ERROR);
-  }
-
-  if (empty($result)) {
-    backdrop_goto('admin/structure/recipes');
-  }
-
-  return $result;
 }
 
 /**
@@ -84,8 +62,8 @@ function recipes_action_execute($action_key, $module = NULL) {
 function recipe_load($project) {
   $modules = system_rebuild_module_data();
   return array(
-    'project' => $project,
-    'name' => $modules[$project]->info['name'],
+    'machine_name' => $project,
+    'label' => $modules[$project]->info['name'],
   );
 }
 
@@ -155,34 +133,35 @@ function theme_recipe_fieldset($variables) {
 /**
  * Retrieves a single action's info by its name, or all actions
  *
- * @param (string) $action_key
+ * @param (string) $action
  *   The key of the recipe action to retrieve.
  */
-function recipes_actions_get_info($action_key = NULL) {
+function recipes_actions_get_info($action = NULL) {
   $actions = &backdrop_static(__FUNCTION__);
 
   if (!isset($actions)) {
     $actions = array();
     foreach (module_implements('recipes_action_info') as $module) {
-      $module_actions = module_invoke($module, 'recipes_action_info');
-      foreach ($module_actions as $module_action_name => $action_info) {
+      $all_actions = module_invoke($module, 'recipes_action_info');
+      foreach ($all_actions as $action_key => $action_info) {
         $action_info += array(
-          'callback' => $module_action_name,
           'module' => $module,
+          'callback' => $action_key . '_form',
+          'permission' => 'manage recipes',
           'requirements_callback' => 'recipes_action_requirements',
         );
-        $actions[$module_action_name] = $action_info;
+        $actions[$action_key] = $action_info;
       }
     }
     backdrop_alter('recipes_action_info', $actions);
     //backdrop_sort($actions);
   }
 
-  if (!isset($action_key)) {
+  if (!isset($action)) {
     return $actions;
   }
-  elseif (is_array($actions) && isset($actions[$action_key])) {
-    return $actions[$action_key];
+  elseif (is_array($actions) && isset($actions[$action])) {
+    return $actions[$action];
   }
   else {
     return FALSE;
@@ -231,42 +210,42 @@ function recipes_requirements_module_disabled($module) {
  */
 function recipes_recipes_action_info() {
   $operations = array(
-    'recipes_import' => array(
+    'import' => array(
       'label' => 'Apply / Install',
-      //'callback' => 'recipes_import_recipes_action',
+      'callback' => 'recipes_import_form',
       'requirements_callback' => 'recipes_requirements_module_disabled',
-      'permissions' => array('manage recipes'),
+      'permission' => array('manage recipes'),
       'file' => 'recipes.actions.inc',
     ),
-    'recipes_inspect' => array(
+    'inspect' => array(
       'label' => t('Inspect / View'),
-      //'callback' => 'recipes_inspect_recipes_action',
-      'permissions' => array('manage recipes', 'inspect recipes'),
+      'callback' => 'recipes_inspect_form',
+      'permission' => array('manage recipes', 'inspect recipes'),
       'file' => 'recipes.actions.inc',
     ),
-    'recipes_revert' => array(
+    'revert' => array(
       'label' => 'Revert / Restore',
-      //'callback' => 'recipes_revert_recipes_action',
+      'callback' => 'recipes_revert_form',
       'requirements_callback' => 'recipes_requirements_module_enabled',
-      'permissions' => array('manage recipes'),
+      'permission' => array('manage recipes'),
       'file' => 'recipes.actions.inc',
     ),
-    'recipes_remove' => array(
+    'remove' => array(
       'label' => t('Remove / Uninstall'),
-      //'callback' => 'recipes_remove_recipes_action',
+      'callback' => 'recipes_remove_form',
       'requirements_callback' => 'recipes_requirements_module_enabled',
-      'permissions' => array('manage recipes'),
+      'permission' => array('manage recipes'),
       'file' => 'recipes.actions.inc',
     ),
     /*
-    'recipes_export' => array(
-      'label' => t('Export recipe'),
-      //'callback' => 'recipes_export_recipes_action',
+    'export' => array(
+      'label' => t('Export / Extract'),
+      'callback' => 'recipes_export_form',
       'requirements_callback' => 'recipes_requirements_module_enabled',
-      'permissions' => array('manage recipes'),
+      'permission' => array('manage recipes'),
       'file' => 'recipes.actions.inc',
-    ),
-    */
+    ),*/
   );
+
   return $operations;
 }

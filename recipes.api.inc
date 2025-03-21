@@ -31,20 +31,27 @@
  */
 function hook_recipes_action_info() {
   $actions = array(
-    'recipes_import' => array(
+    'import' => array(
       'label' => t('Import'),
       'callback' => 'recipes_import_recipes_action',
-      'permissions' => array('manage recipes'),
+      'permission' => array('manage recipes'),
       'requirements_callback' => 'recipes_requirements_module_enabled',
       'file' => 'recipes.operations.inc',
     ),
-    'recipes_inspect' => array(
+    'inspect' => array(
       'label' => t('Inspect'),
       'callback' => 'recipes_inspect_recipes_action',
-      'permissions' => array('manage recipes', 'inspect recipes'),
+      'permission' => array('manage recipes', 'inspect recipes'),
       'file' => 'recipes.operations.inc',
     ),
   );
 
   return $actions;
+}
+
+/**
+ * Alter recipe actions.
+ */
+function hook_recipes_action_info_alter(&$actions) {
+  $actions['import']['label'] = t('Apply');
 }
