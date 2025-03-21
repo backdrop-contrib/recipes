@@ -17,12 +17,14 @@ function recipes_permission() {
       'title' => t('Manage recipes'),
       'description' => t('Enable, Disable, and Revert recipes.'),
     ),
+    /*
     'inspect recipes' =>  array(
       'title' => t('Inspect recipes'),
       'description' => t('View and manage the technical deails of a recipe.'),
       'restrict access' => TRUE,
       'warning' => t('People who can inspect recipes will also be able to delete individual config files.'),
     ),
+    */
   );
 }
 
@@ -211,27 +213,28 @@ function recipes_requirements_module_disabled($module) {
 function recipes_recipes_action_info() {
   $operations = array(
     'import' => array(
-      'label' => 'Apply / Install',
+      'label' => 'Enable',
       'callback' => 'recipes_import_form',
       'requirements_callback' => 'recipes_requirements_module_disabled',
       'permission' => array('manage recipes'),
       'file' => 'recipes.actions.inc',
     ),
     'inspect' => array(
-      'label' => t('Inspect / View'),
+      'label' => t('View'),
       'callback' => 'recipes_inspect_form',
-      'permission' => array('manage recipes', 'inspect recipes'),
+      'permission' => array('manage recipes'),
       'file' => 'recipes.actions.inc',
     ),
     'revert' => array(
-      'label' => 'Revert / Restore',
+      'label' => 'Revert',
       'callback' => 'recipes_revert_form',
       'requirements_callback' => 'recipes_requirements_module_enabled',
       'permission' => array('manage recipes'),
       'file' => 'recipes.actions.inc',
     ),
     'remove' => array(
-      'label' => t('Remove / Uninstall'),
+      'label' => t('Uninstall'),
+      //'label' => t('Remove'),
       'callback' => 'recipes_remove_form',
       'requirements_callback' => 'recipes_requirements_module_enabled',
       'permission' => array('manage recipes'),

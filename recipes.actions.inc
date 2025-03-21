@@ -28,7 +28,7 @@ function recipes_import_form($form, $form_state, $recipe) {
   //module_disable(array($recipe['machine_name']));
 
   // Set a mesage.
-  $message = 'The <em>%recipe Recipe</em> has been applied to this site.';
+  $message = 'The <em>%recipe</em> has been applied to this site.';
   $replacements = array('%recipe' => recipes_clean_name($recipe['label']));
   backdrop_set_message(t($message, $replacements));
 
@@ -63,7 +63,7 @@ function recipes_revert_form($form, $form_state, $recipe) {
 
   // Confirm form.
   $replacements = array('%recipe' => recipes_clean_name($recipe['label']));
-  $message = t('Are you sure you want to revert the <em>%recipe Recipe</em> to the default state?', $replacements);
+  $message = t('Are you sure you want to revert the <em>%recipe</em> to the default state?', $replacements);
   $path = 'admin/structure/recipes';
   $description = NULL; // Cannot be undone.
   $yes_text = t('Overwrite config files');
@@ -84,7 +84,7 @@ function recipes_revert_form_submit(&$form, &$form_state) {
 
   // Set a message.
   $replacements = array('%recipe' => recipes_clean_name($recipe['label']));
-  $message = 'Configuration for <em>%recipe Recipe</em> revered to original state.';
+  $message = 'Configuration for <em>%recipe</em> revered to original state.';
   backdrop_set_message(t($message, $replacements));
 
   // Go back to listing.
@@ -118,7 +118,7 @@ function recipes_export_form($form, $form_state, $recipe) {
 
   // Confirm form.
   $replacements = array('%recipe' => recipes_clean_name($recipe['label']));
-  $message = 'Are you sure you want to export the configuration files for the <em>%recipe Recipe</em>?';
+  $message = 'Are you sure you want to export the configuration files for the <em>%recipe</em>?';
   $question = t($message, $replacements);
   $path = 'admin/structure/recipes';
   $description = NULL; // Cannot be undone.
@@ -141,7 +141,7 @@ function recipes_export_form_submit(&$form, $form_state) {
 
   // Set a message.
   $replacements = array('%recipe' => recipes_clean_name($recipe['label']));
-  $message = 'Configuration for <em>%recipe Recipe</em> has been revered to the original state.';
+  $message = 'Configuration for <em>%recipe</em> has been revered to the original state.';
   backdrop_set_message(t($message, $replacements));
 
   // Go back to listing.
@@ -165,7 +165,9 @@ function recipes_remove_form($form, $form_state, $recipe) {
   );
 
   $markup = _recipes_list_config_files($recipe);
-  $markup .= '<p><strong>' . t('These active configuration files will be removed.') . '</strong></p>';
+  // @todo switch summary
+  //$markup .= '<p><strong>' . t('These active configuration files will be removed.') . '</strong></p>';
+  $markup .= '<p>' . t('These config files will remain, but the recipe module will be uninstalled. ') . '</p>';
   $form['configuration'] = array(
     '#type' => 'markup',
     '#markup' => $markup,
@@ -173,10 +175,12 @@ function recipes_remove_form($form, $form_state, $recipe) {
 
   // Confirm form.
   $replacements = array('%recipe' => recipes_clean_name($recipe['label']));
-  $message = t('Are you sure you want to remove the configuration files for the <em>%recipe Recipe</em>?', $replacements);
+  $message = t('Are you sure you want to remove the configuration files for the <em>%recipe</em>?', $replacements);
   $path = 'admin/structure/recipes';
-  $description = NULL; // Cannot be undone.
-  $yes_text = t('Remove config files');
+  $description = '';
+  //$description = NULL; // Cannot be undone.
+  //$yes_text = t('Remove config files'); // @todo Uncomment when soon happens
+  $yes_text = t('Uninstall recipe');
   $no_text = t('Cancel');
 
   return confirm_form($form, $message, $path, $description, $yes_text, $no_text, 'recipes_remove');
@@ -189,12 +193,15 @@ function recipes_remove_form($form, $form_state, $recipe) {
 function recipes_remove_form_submit(&$form, $form_state) {
   $recipe = $form_state['values']['recipe'];
 
-  // @todo Figure out how to delete only the config added by this recipe.
   module_disable(array($recipe['machine_name']));
   backdrop_uninstall_modules(array($recipe['machine_name']));
+  // @todo Figure out how to delete only the config added by this recipe.
+
 
   $replacements = array('%recipe' => recipes_clean_name($recipe['label']));
-  $message = 'Configuration for <em>%recipe Recipe</em> revered to original state.';
+  // @todo replace message
+  //$message = 'Configuration for <em>%recipe</em> removed from active.';
+  $message = 'The <em>%recipe</em> module has been uninstalled.';
   backdrop_set_message(t($message, $replacements));
 
   // Go back to listing.
@@ -264,7 +271,7 @@ function _recipes_list_config_files($recipe) {
 function recipes_clean_name($name) {
   $lower_name = strtolower(check_plain($name));
   $clean_name = trim(str_replace('recipe', '', $lower_name));
-  return ucfirst($clean_name);
+  return ucfirst($clean_name) . ' ' . t('Recipe');
 }
 
 /**
