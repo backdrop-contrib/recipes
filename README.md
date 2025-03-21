@@ -9,7 +9,7 @@ Supported actions:
 - Revert recipe: Will re-install the configuration files from this recipe, overwriting
     any changes.
 - Inspect recipe: Will list all config files included in this recipe.
-- Remove recipe: Will remove all active config files originating from this recipe.
+- Remove recipe: (Coming soon) Will remove all active config files originating from this recipe.
 - Export recipe: (Coming soon) Will re-export the current state of the configuratuion
     files from this recipe, including any changes that have been made.
 

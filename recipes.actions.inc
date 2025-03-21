@@ -219,8 +219,18 @@ function recipes_inspect_form($form, $form_state, $recipe) {
   );
 
   $markup = _recipes_list_config_files($recipe);
-  $back_link = l(t('Back to recipe list'), 'admin/structure/recipes');
-  $markup .= '<p>' . $back_link . '</p>';
+
+  $element['return'] = array(
+    '#type' => 'dropbutton',
+    '#links' => array(
+      'edit-details' => array(
+        'title' => t('Back to recipe list'),
+        'href' => 'admin/structure/recipes',
+      ),
+    ),
+  );
+
+  $markup .= backdrop_render($element);
 
   $form['configuration'] = array(
     '#type' => 'markup',
@@ -240,7 +250,10 @@ function _recipes_list_config_files($recipe) {
 
   $config_path = backdrop_get_path('module', $recipe['machine_name']) . '/config';
   $files = array_diff(scandir($config_path), array('..', '.'));
+
+  $markup .= '<pre>';
   $markup .= theme('item_list', array('items' => $files));
+  $markup .= '</pre>';
 
   return $markup;
 }
@@ -255,6 +268,8 @@ function recipes_clean_name($name) {
 }
 
 /**
+ * Revert config by importing over existing files.
+ *
  * @see config_install_default_config().
  */
 function recipes_overwrite_config($project) {

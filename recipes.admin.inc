@@ -5,10 +5,9 @@
  */
 
 /**
- * Implements hook_menu().
+ * Menu callback: Admin form & listing.
  */
 function recipes_admin($form, &$form_state = array()) {
-  backdrop_set_title('Recipes');
 
   // Get current list of modules.
   $files = system_rebuild_module_data();
@@ -35,11 +34,6 @@ function recipes_admin($form, &$form_state = array()) {
     $extra['disabled'] = (array_key_exists('disabled', $module->info)) ? $module->info['disabled'] : FALSE;
     if ($extra['disabled'] && !empty($module->info['explanation'])) {
       $extra['required_by'][] = $module->info['explanation'];
-    }
-
-    // Check to see if this is a core module.
-    if (strstr($module->uri, 'core/modules')) {
-      $extra['core'] = TRUE;
     }
 
     // Some modules are always required by core and cannot be disabled, for
@@ -153,7 +147,6 @@ function _recipes_build_row($info, $extra) {
     'disabled' => FALSE,
     'enabled' => FALSE,
     'links' => array(),
-    'core' => FALSE,
   );
   $form = array(
     '#tree' => TRUE,
@@ -203,7 +196,6 @@ function _recipes_build_row($info, $extra) {
   }
 
   $operations = array();
-
   // If this module is compatible, present a list of available operations.
   if ($compatible) {
     $actions = recipes_actions_get_info();
@@ -216,6 +208,9 @@ function _recipes_build_row($info, $extra) {
       if (!$requirements) {
         continue;
       }
+      if ($extra['disabled'] && $action_key == 'import') {
+        continue;
+      }
       if (!empty($action_info['permission'])) {
         foreach ($action_info['permission'] as $permission) {
           if (user_access($permission)) {
@@ -226,7 +221,6 @@ function _recipes_build_row($info, $extra) {
     }
   }
   else {
-    $operations = array();
     $form['description']['#markup'] .= theme('system_modules_incompatible',
       array('message' => trim($status_long)));
   }
@@ -244,10 +238,18 @@ function _recipes_build_row($info, $extra) {
       ),
     );
   }
-  $form['links'] = array(
-    '#type' => 'dropbutton',
-    '#links' => $links,
-  );
+  if (!empty($links)) {
+    $form['links'] = array(
+      '#type' => 'dropbutton',
+      '#links' => $links,
+    );
+  }
+  else {
+    $form['links'] = array(
+      '#type' => 'markup',
+      '#markup' => t('Disabled'),
+    );
+  }
 
   return $form;
 }
