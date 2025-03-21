@@ -19,7 +19,6 @@ Supported actions:
 Include the following lines to your recipe module's .info file to have it appear
 on the recipies listing page (admin/structure/recipes):
 ```
-type = module
 package = Recipes
 ```
 
