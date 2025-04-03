@@ -99,7 +99,7 @@ function recipes_actions_get_info($action = NULL) {
           'module' => $module,
           'callback' => $action_key . '_form',
           'permission' => 'manage recipes',
-          'requirements_callback' => 'recipes_action_requirements',
+          'requirements_callback' => 'recipes_requirements_true',
         );
         $actions[$action_key] = $action_info;
       }
@@ -122,7 +122,7 @@ function recipes_actions_get_info($action = NULL) {
 /**
  * Default requirements callback, always TRUE.
  */
-function recipes_requirements() {
+function recipes_requirements_true() {
   return TRUE;
 }
 
