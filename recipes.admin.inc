@@ -20,8 +20,22 @@ function recipes_admin($form, &$form_state = array()) {
     }
   }
 
-  $modules = array();
+  // Create the form.
   $form['modules'] = array('#tree' => TRUE);
+  $form['modules']['recipes'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Recipes'),
+    '#theme' => 'recipes_fieldset',
+    '#header' => array(
+      t('Name'),
+      array('data' => t('Version'), 'class' => array(RESPONSIVE_PRIORITY_MEDIUM)),
+      array('data' => t('Description'), 'class' => array(RESPONSIVE_PRIORITY_LOW)),
+      array('data' => t('Requirements'), 'class' => array(RESPONSIVE_PRIORITY_LOW)),
+      array('data' => t('Operations')),
+    ),
+  );
+
+  $modules = array();
 
   // Used when displaying modules that are required by the installation profile.
   require_once BACKDROP_ROOT . '/core/includes/install.inc';
@@ -99,25 +113,9 @@ function recipes_admin($form, &$form_state = array()) {
         }
       }
     }
-    $form['modules'][$module->info['package']][$filename] = _recipes_build_row($module->info, $extra);
-  }
 
-  // Add basic information to the fieldsets.
-  foreach (element_children($form['modules']) as $package) {
-    $form['modules'][$package] += array(
-      '#type' => 'fieldset',
-      '#title' => t($package),
-      '#theme' => 'recipe_fieldset',
-      '#header' => array(
-        t('Name'),
-        array('data' => t('Version'), 'class' => array(RESPONSIVE_PRIORITY_MEDIUM)),
-        array('data' => t('Description'), 'class' => array(RESPONSIVE_PRIORITY_LOW)),
-        array('data' => t('Requirements'), 'class' => array(RESPONSIVE_PRIORITY_LOW)),
-        array('data' => t('Operations')),
-      ),
-    );
+    $form['modules']['recipes'][$filename] = _recipes_build_row($module->info, $extra);
   }
-  ksort($form['modules']);
 
   return $form;
 }
