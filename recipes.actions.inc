@@ -5,56 +5,43 @@
  */
 
 /**
- * Form: Applies a recipe to a site by installing as a module.
+ * Form: Applies a recipe to a site by installing dependencies and importing
+ * configuration.
  *
- * @param $recipe
- *   Fully loaded recipe project as results from recipe_load(). Keys are:
- *   - label: human-readable name of the module.
- *   - machine_name: machine name of the recipe module project.
+ * @param array $recipe
+ *   Fully loaded recipe implementation as results from recipes_load().
  *
  * @return none.
  */
-function recipes_import_form($form, $form_state, $recipe) {
+function recipes_apply_form($form, $form_state, $recipe) {
   // Check the token before performing any action directly.
   if (!isset($_GET['token']) || !backdrop_valid_token($_GET['token'], current_path())) {
     backdrop_set_message(t('Invalid token'));
     backdrop_goto('admin/structure/recipes');
   }
+  $form['#attached']['library'][] = array('recipes', 'recipes.admin');
 
-  // Enabling the recipe will import the config.
-  module_enable(array($recipe['machine_name']), TRUE);
-
-  // Do we want to disable it again too?  - make a setting for this.
-  //module_disable(array($recipe['machine_name']));
-
-  // Set a mesage.
-  $message = 'The <em>%recipe</em> has been applied to this site.';
-  $replacements = array('%recipe' => recipes_clean_name($recipe['label']));
-  backdrop_set_message(t($message, $replacements));
+  recipes_apply_recipe($recipe['signature']);
 
   // Go back to listing.
   backdrop_goto('admin/structure/recipes');
-  // No return value to return to recipes listing.
-  return array();
 }
 
 /**
- * Form: Reverts the config included in a recipe back to the state provided by the recipe.
+ * Form: Force applies the config included in a recipe back to the state
+ * provided by the recipe while applying the recipe.
  *
- * @param $recipe
- *   Fully loaded recipe project as results from recipe_load(). Keys are:
- *   - label: human-readable name of the module.
- *   - machine_name: machine name of the recipe module project.
+ * @param array $recipe
+ *   Fully loaded recipe implementation as results from recipes_load().
  *
- * @return confirm form.
+ * @return none.
  */
-function recipes_revert_form($form, $form_state, $recipe) {
+function recipes_force_apply_form($form, $form_state, $recipe) {
   $form['recipe'] = array(
     '#type' => 'value',
     '#value' => $recipe,
   );
-
-  $markup = _recipes_list_config_files($recipe);
+  $markup = _recipes_do('list', 'config', $recipe['signature']);
   $markup .= '<p><strong>' . t('These active configuration files will be overwritten.') . '</strong></p>';
   $form['configuration'] = array(
     '#type' => 'markup',
@@ -62,29 +49,29 @@ function recipes_revert_form($form, $form_state, $recipe) {
   );
 
   // Confirm form.
-  $replacements = array('%recipe' => recipes_clean_name($recipe['label']));
-  $message = t('Are you sure you want to revert the <em>%recipe</em> to the default state?', $replacements);
+  $replacements = array('%recipe' => $recipe['label'] ?? $recipe['name']);
+  $message = t('Are you sure you want to force apply the <em>%recipe</em>?', $replacements);
   $path = 'admin/structure/recipes';
-  $description = NULL; // Cannot be undone.
-  $yes_text = t('Overwrite config files');
+  $description = t('This action will force overwrite the configuration files listed above with the recipe\'s default state. This cannot be undone.');
+  $yes_text = t('Force overwrite config files');
   $no_text = t('Cancel');
 
-  return confirm_form($form, $message, $path, $description, $yes_text, $no_text, 'recipes_revert_confirm');
+  return confirm_form($form, $message, $path, $description, $yes_text, $no_text, 'recipes_force_apply_confirm');
 }
 
 /**
- * Submit handler for revert confirm form.
- * @see recipes_revert().
+ * Submit handler for force apply confirm form.
+ * @see recipes_force_apply_form()
  */
-function recipes_revert_form_submit(&$form, &$form_state) {
+function recipes_force_apply_form_submit(&$form, &$form_state) {
   $recipe = $form_state['values']['recipe'];
 
-  // @todo Will this revert? needs testing.
-  recipes_overwrite_config($recipe['machine_name']);
+  // Force apply the recipe.
+  recipes_apply_recipe($recipe['signature'], TRUE);
 
   // Set a message.
-  $replacements = array('%recipe' => recipes_clean_name($recipe['label']));
-  $message = 'Configuration for <em>%recipe</em> revered to original state.';
+  $replacements = array('%recipe' => $recipe['label'] ?? $recipe['name']);
+  $message = 'Configuration for <em>%recipe</em> force applied to recipe\'s original state.';
   backdrop_set_message(t($message, $replacements));
 
   // Go back to listing.
@@ -92,56 +79,48 @@ function recipes_revert_form_submit(&$form, &$form_state) {
 }
 
 /**
- * Form: Extracts the config included in a recipe.
+ * Form: Detaches the recipe without changes by marking the recipe as inactive.
  *
- * @param $recipe
- *   Fully loaded recipe project as results from recipe_load(). Keys are:
- *   - label: human-readable name of the module.
- *   - machine_name: machine name of the recipe module project.
+ * @param array $recipe
+ *   Fully loaded recipe implementation as results from recipes_load().
  *
- * @return confirm form.
+ * @return none.
  */
-function recipes_export_form($form, $form_state, $recipe) {
+function recipes_detach_form($form, $form_state, $recipe) {
   $form['recipe'] = array(
     '#type' => 'value',
     '#value' => $recipe,
   );
-
-  $markup = _recipes_list_config_files($recipe);
-  $back_link = l(t('Back to recipe list'), 'admin/structure/recipes');
-  $markup .= '<p>' . $back_link . '</p>';
-
+  $markup = '<p><strong>' . t('Detaching this recipe will mark it as inactive without any additional changes.') . '</strong></p>';
   $form['configuration'] = array(
     '#type' => 'markup',
     '#markup' => $markup,
   );
 
   // Confirm form.
-  $replacements = array('%recipe' => recipes_clean_name($recipe['label']));
-  $message = 'Are you sure you want to export the configuration files for the <em>%recipe</em>?';
-  $question = t($message, $replacements);
+  $replacements = array('%recipe' => $recipe['label'] ?? $recipe['name']);
+  $message = t('Are you sure you want to detach the <em>%recipe</em> recipe?', $replacements);
   $path = 'admin/structure/recipes';
-  $description = NULL; // Cannot be undone.
-  $yes_text = t('Extract recipe');
+  $description = t('The recipe will be marked as inactive. Any configuration, state, or permissions changes the recipe made will remain. Any modules enabled by the recipe will not be disabled.');
+  $yes_text = t('Detach recipe');
   $no_text = t('Cancel');
-  $name = 'recipes_export_confirm';
 
-  return confirm_form($form, $question, $path, $description, $yes_text, $no_text, 'recipes_export');
+  return confirm_form($form, $message, $path, $description, $yes_text, $no_text, 'recipes_detach_confirm');
 }
 
 /**
- * Submit handler for confirm form.
- * @see recipes_export().
+ * Submit handler for detach confirm form.
+ * @see recipes_detach_form()
  */
-function recipes_export_form_submit(&$form, $form_state) {
+function recipes_detach_form_submit(&$form, &$form_state) {
   $recipe = $form_state['values']['recipe'];
 
-  // Export the configuration.
-  // @todo
+  // Detach the recipe.
+  recipes_mark_inactive($recipe['signature']);
 
   // Set a message.
-  $replacements = array('%recipe' => recipes_clean_name($recipe['label']));
-  $message = 'Configuration for <em>%recipe</em> has been revered to the original state.';
+  $replacements = array('%recipe' => $recipe['label'] ?? $recipe['name']);
+  $message = 'The <em>%recipe</em> has been detached.';
   backdrop_set_message(t($message, $replacements));
 
   // Go back to listing.
@@ -149,60 +128,115 @@ function recipes_export_form_submit(&$form, $form_state) {
 }
 
 /**
- * Form: ALlows a recipe to be un-applied.
+ * Form: Allows a recipe to be un-applied.
  *
- * @param $recipe
- *   Fully loaded recipe project as results from recipe_load(). Keys are:
- *   - label: human-readable name of the module.
- *   - machine_name: machine name of the recipe module project.
+ * @param array $recipe
+ *   Fully loaded recipe implementation as results from recipes_load().
  *
  * @return confirm form.
  */
-function recipes_remove_form($form, $form_state, $recipe) {
+function recipes_rollback_form($form, $form_state, $recipe) {
+  // Check the token before performing any action directly.
+  if (!isset($_GET['token']) || !backdrop_valid_token($_GET['token'], current_path())) {
+    backdrop_set_message(t('Invalid token'));
+    backdrop_goto('admin/structure/recipes');
+  }
+  if (empty($recipe)) {
+    backdrop_set_message(t('Recipe not found.'), 'error');
+    backdrop_goto('admin/structure/recipes');
+  }
+
+  module_load_include('inc', 'recipes', 'recipes.admin');
+  $rollback_signature = 'rollback|' . $recipe['signature'];
+  $rollback_recipe = recipes_load($rollback_signature);
+  if (empty($rollback_recipe)) {
+    backdrop_set_message(t('Rollback recipe not found.'), 'error');
+    backdrop_goto('admin/structure/recipes');
+  }
   $form['recipe'] = array(
     '#type' => 'value',
     '#value' => $recipe,
   );
 
-  $markup = _recipes_list_config_files($recipe);
-  // @todo switch summary
-  //$markup .= '<p><strong>' . t('These active configuration files will be removed.') . '</strong></p>';
-  $markup .= '<p>' . t('These config files will remain, but the recipe module will be uninstalled. ') . '</p>';
+  $inspect_title = t('Rollback Recipe: @recipe', array(
+    '@recipe' => $recipe['label'] ?? $recipe['name'],
+  ));
+  $inspect_subtitle = '<p><em>' . t('Rollback recipe changes') . '</em></p>';
+
+  $inspect_actions = recipes_admin_operations($recipe);
+
+  if (!empty($rollback_recipe['config'])) {
+    $block_content = _recipes_do('list', 'config', $rollback_signature);
+    $message = t('Configuration will not currently be rolled back due to potential conflicts with database setup, but you can manually remove fields, etc, through the UI.');
+  }
+  else {
+    $block_content = '<p>' . t('No configuration found in this recipe.') . '</p>';
+    $message = '';
+  }
+  $inspect_blocks[] = array(
+    'title' => t('Bundled Configuration'),
+    'message' => $message ?? '',
+    'content' => $block_content,
+  );
+
+  if (!empty($rollback_recipe['dependencies'])) {
+    $block_content = _recipes_do('list', 'dependencies', $rollback_signature);
+    $message = t('The dependencies will be rolled back to the last saved state, as shown below.');
+  }
+  else {
+    $block_content = '<p>' . t('No dependencies found in this recipe.') . '</p>';
+    $message = '';
+  }
+  $inspect_blocks[] = array(
+    'title' => t('Dependencies'),
+    'message' => $message ?? '',
+    'content' => $block_content,
+  );
+
+  if (!empty($rollback_recipe['overrides'])) {
+    $block_content = _recipes_do('list', 'overrides', $rollback_signature);
+    $message = t('The overrides will be rolled back to the last saved state, as shown below.');
+  }
+  else {
+    $block_content = '<p>' . t('No overrides found in this recipe.') . '</p>';
+    $message = '';
+  }
+  $inspect_blocks[] = array('title' => t('Overrides'),
+    'message' => $message ?? '',
+    'content' => $block_content,
+  );
+
   $form['configuration'] = array(
-    '#type' => 'markup',
-    '#markup' => $markup,
+    'type' => 'markup',
+    '#markup' => theme('recipes_inspect', array(
+      'title' => $inspect_title,
+      'subtitle' => $inspect_subtitle,
+      'actions' => (!empty($inspect_actions['#links']) ? $inspect_actions : array()),
+      'blocks' => $inspect_blocks,
+    )),
   );
 
   // Confirm form.
-  $replacements = array('%recipe' => recipes_clean_name($recipe['label']));
-  $message = t('Are you sure you want to remove the configuration files for the <em>%recipe</em>?', $replacements);
+  $replacements = array('%recipe' => $recipe['label'] ?? $recipe['name']);
+  $message = t('Are you sure you want to roll back the <em>%recipe</em> recipe?', $replacements);
   $path = 'admin/structure/recipes';
-  $description = '';
-  //$description = NULL; // Cannot be undone.
-  //$yes_text = t('Remove config files'); // @todo Uncomment when soon happens
-  $yes_text = t('Uninstall recipe');
+  $description = '<p>' . t('Depending on what else has changed since you applied the recipe, this rollback may not behave as expected. A full backup is recommended. Continue to attempt any rollbacks noted and then fully detach the recipe.') . '</p>';
+  $yes_text = t('Rollback recipe');
   $no_text = t('Cancel');
 
-  return confirm_form($form, $message, $path, $description, $yes_text, $no_text, 'recipes_remove');
+  return confirm_form($form, $message, $path, $description, $yes_text, $no_text, 'recipes_rollback');
 }
 
 /**
  * Submit handler for confirm form.
- * @see recipes_remove().
+ * @see recipes_rollback_form()
  */
-function recipes_remove_form_submit(&$form, $form_state) {
+function recipes_rollback_form_submit(&$form, $form_state) {
   $recipe = $form_state['values']['recipe'];
+  $result = recipes_rollback_recipe($recipe['signature']);
 
-  module_disable(array($recipe['machine_name']));
-  backdrop_uninstall_modules(array($recipe['machine_name']));
-  // @todo Figure out how to delete only the config added by this recipe.
-
-
-  $replacements = array('%recipe' => recipes_clean_name($recipe['label']));
-  // @todo replace message
-  //$message = 'Configuration for <em>%recipe</em> removed from active.';
-  $message = 'The <em>%recipe</em> module has been uninstalled.';
-  backdrop_set_message(t($message, $replacements));
+  $message = 'The <em>%recipe</em> recipe has been rolled back.';
+  backdrop_set_message(t($message, array('%recipe' => $recipe['label'] ?? $recipe['name'])));
 
   // Go back to listing.
   backdrop_goto('admin/structure/recipes');
@@ -212,7 +246,7 @@ function recipes_remove_form_submit(&$form, $form_state) {
  * Form: Shows the contents of a recipe.
  *
  * @param $recipe
- *   Fully loaded recipe project as results from recipe_load(). Keys are:
+ *   Fully loaded recipe project as results from recipes_load(). Keys are:
  *   - label: human-readable name of the module.
  *   - machine_name: machine name of the recipe module project.
  *
@@ -220,13 +254,46 @@ function recipes_remove_form_submit(&$form, $form_state) {
  *   Rendered HTML for the inspection page.
  */
 function recipes_inspect_form($form, $form_state, $recipe) {
+  module_load_include('inc', 'recipes', 'recipes.admin');
+  $markup = '';
   $form['recipe'] = array(
     '#type' => 'value',
     '#value' => $recipe,
   );
 
-  $markup = _recipes_list_config_files($recipe);
+  $inspect_title = t('Recipe: @recipe', array(
+    '@recipe' => $recipe['label'] ?? $recipe['name'],
+  ));
+  $inspect_subtitle = '<p><em>' . $recipe['signature'] . '</em></p>';
 
+  $inspect_actions = recipes_admin_operations($recipe);
+  unset($inspect_actions['#links']['inspect']);
+
+  $block_content = _recipes_do('list', 'config', $recipe['signature']);
+  $inspect_blocks[] = array(
+    'title' => t('Bundled Configuration'),
+    'message' => '',
+    'content' => $block_content,
+  );
+  if (!empty($recipe['dependencies'])) {
+    $block_content = _recipes_do('list', 'dependencies', $recipe['signature']);
+  }
+  else {
+    $block_content = '<p>' . t('No dependencies found in this recipe.') . '</p>';
+  }
+  $inspect_blocks[] = array(
+    'title' => t('Dependencies'),
+    'message' => '',
+    'content' => $block_content,
+  );
+  $block_content = _recipes_do('list', 'overrides', $recipe['signature']);
+  $inspect_blocks[] = array(
+    'title' => t('Overrides'),
+    'message' => '',
+    'content' => $block_content,
+  );
+
+  $element = array();
   $element['return'] = array(
     '#type' => 'dropbutton',
     '#links' => array(
@@ -237,7 +304,13 @@ function recipes_inspect_form($form, $form_state, $recipe) {
     ),
   );
 
-  $markup .= backdrop_render($element);
+  $markup .= theme('recipes_inspect', array(
+    'page' => $element,
+    'title' => $inspect_title,
+    'actions' => $inspect_actions,
+    'subtitle' => $inspect_subtitle,
+    'blocks' => $inspect_blocks ?? array(),
+  ));
 
   $form['configuration'] = array(
     '#type' => 'markup',
@@ -248,36 +321,9 @@ function recipes_inspect_form($form, $form_state, $recipe) {
 }
 
 /**
- * Generates a list of config files contained in a recipe.
- */
-function _recipes_list_config_files($recipe) {
-  $replacements = array('%recipe' => recipes_clean_name($recipe['label']));
-  $message = t('The <em>%recipe</em> recipe contains the following configuration files:', $replacements);
-  $markup = '<p>' . $message . '</p>';
-
-  $config_path = backdrop_get_path('module', $recipe['machine_name']) . '/config';
-  $files = array_diff(scandir($config_path), array('..', '.'));
-
-  $markup .= '<pre>';
-  $markup .= theme('item_list', array('items' => $files));
-  $markup .= '</pre>';
-
-  return $markup;
-}
-
-/**
- * Cleans the name of the recipe module and removes the word 'recipe';
- */
-function recipes_clean_name($name) {
-  $lower_name = strtolower(check_plain($name));
-  $clean_name = trim(str_replace('recipe', '', $lower_name));
-  return ucfirst($clean_name) . ' ' . t('Recipe');
-}
-
-/**
  * Revert config by importing over existing files.
  *
- * @see config_install_default_config().
+ * @see config_install_default_config()
  */
 function recipes_overwrite_config($project) {
   $project_path = backdrop_get_path('module', $project);

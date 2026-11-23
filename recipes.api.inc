@@ -1,7 +1,7 @@
 <?php
 /**
  * @file
- * Provides an admin interface for managing recipes.
+ * Defines the API for recipe actions.
  */
 
 /**
@@ -31,11 +31,11 @@
  */
 function hook_recipes_action_info() {
   $actions = array(
-    'import' => array(
+    'apply' => array(
       'label' => t('Import'),
-      'callback' => 'recipes_import_recipes_action',
+      'callback' => 'recipes_apply_recipes_action',
       'permission' => array('manage recipes'),
-      'requirements_callback' => 'recipes_requirements_module_enabled',
+      'requirements_callback' => 'recipes_requirements_has_not_been_applied',
       'file' => 'recipes.operations.inc',
     ),
     'inspect' => array(
@@ -53,5 +53,5 @@ function hook_recipes_action_info() {
  * Alter recipe actions.
  */
 function hook_recipes_action_info_alter(&$actions) {
-  $actions['import']['label'] = t('Apply');
+  $actions['apply']['label'] = t('Apply');
 }
