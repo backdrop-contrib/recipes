@@ -1,30 +1,70 @@
 <?php
 /**
  * @file
- * Provides an admin interface for managing recipes.
+ * Provides functionality and an admin interface for managing recipes.
  */
+
+define ('RECIPES_STATUS_UNAVAILABLE', 'unavailable');
+define ('RECIPES_STATUS_AVAILABLE', 'available');
+define ('RECIPES_STATUS_INSTALLED', 'installed');
+define ('RECIPES_STATUS_CHANGED', 'changed');
+
+include_once backdrop_get_path('module', 'recipes') . '/recipes.helpers.inc';
+
+/**
+ * Implements hook_config_info().
+ */
+function recipes_config_info() {
+  $prefixes['recipes.installed'] = array(
+    'group' => 'Configuration',
+    'label' => t('Recipes installed'),
+  );
+  $prefixes['recipes.rollback'] = array(
+    'name_key' => 'name',
+    'label_key' => 'label',
+    'group' => t('Rollback recipes'),
+  );
+  return $prefixes;
+}
+
+/**
+ * Implements hook_library_info().
+ */
+function recipes_library_info() {
+  $module_path = backdrop_get_path('module', 'recipes');
+  $libraries = array();
+  $libraries['recipes.admin'] = array(
+    'title' => t('Recipes admin'),
+    'version' => '1.0',
+    'js' => array(
+      $module_path . '/js/recipes.admin.js' => array(),
+    ),
+    'css' => array(
+      $module_path . '/css/recipes.admin.css' => array(),
+    ),
+  );
+  return $libraries;
+}
 
 /**
  * Implements hook_permission().
  */
 function recipes_permission() {
   return array(
-    'access recipes overview' =>  array(
-      'title' => t('Manage recipes'),
+    'access recipes overview' => array(
+      'title' => t('Access recipes overview'),
       'description' => t('Access the recipes overview page.'),
     ),
-    'manage recipes' =>  array(
+    'manage recipes' => array(
       'title' => t('Manage recipes'),
       'description' => t('Enable, Disable, and Revert recipes.'),
-    ),
-    /*
-    'inspect recipes' =>  array(
-      'title' => t('Inspect recipes'),
-      'description' => t('View and manage the technical deails of a recipe.'),
       'restrict access' => TRUE,
-      'warning' => t('People who can inspect recipes will also be able to delete individual config files.'),
+      'warning' => t('People who can manage recipes will also be able to make changes to sensitive configuration settings and permissions.'),
     ),
-    */
+    'inspect recipes' => array(
+      'title' => t('Inspect recipes'),
+      'description' => t('View the technical details and overrides within a recipe without making changes directly.'),
+    ),
   );
 }
 
@@ -35,9 +75,17 @@ function recipes_menu() {
   $items['admin/structure/recipes'] = array(
     'title' => 'Recipes',
     'page callback' => 'backdrop_get_form',
-    'page arguments' => array('recipes_admin'),
+    'page arguments' => array('recipes_admin_listing'),
     'access arguments' => array('access recipes overview'),
     'type' => MENU_NORMAL_ITEM,
+    'file' => 'recipes.admin.inc',
+  );
+  $items['admin/structure/recipes/diff/%/%'] = array(
+    'title' => 'Configuration diff',
+    'page callback' => 'recipes_config_diff_page',
+    'page arguments' => array(4, 5),
+    'access arguments' => array('inspect recipes'),
+    'type' => MENU_LOCAL_TASK,
     'file' => 'recipes.admin.inc',
   );
 
@@ -45,28 +93,17 @@ function recipes_menu() {
   $actions = recipes_actions_get_info();
   foreach ($actions as $action_key => $action_info) {
     $form_id = $action_info['callback'];
-    $items['admin/structure/recipes/' . $action_key . '/%recipe'] = array(
+    $items['admin/structure/recipes/' . $action_key . '/%recipes'] = array(
       'title' => 'Recipes ' . $action_info['label'],
       'page callback' => 'backdrop_get_form',
       'page arguments' => array($form_id, 4),
-      'access arguments' => array($action_info['permission']),
+      'access arguments' => $action_info['permission'],
       'type' => MENU_NORMAL_ITEM,
       'file' => $action_info['file'],
     );
   }
 
   return $items;
-}
-
-/**
- * Magic loader: Loads recipe information.
- */
-function recipe_load($project) {
-  $modules = system_rebuild_module_data();
-  return array(
-    'machine_name' => $project,
-    'label' => $modules[$project]->info['name'],
-  );
 }
 
 /**
@@ -77,15 +114,411 @@ function recipes_theme() {
     'recipes_fieldset' => array(
       'render element' => 'form',
       'file' => 'recipes.theme.inc',
+      'attached' => array(
+        'css' => array(
+          backdrop_get_path('module', 'recipes') . '/css/recipes.admin.css' => array(),
+        ),
+      ),
+    ),
+    'recipes_listing' => array(
+      'render element' => 'form',
+      'file' => 'recipes.theme.inc',
+      'attached' => array(
+        'library' => array(
+          array('recipes', 'recipes.admin'),
+        ),
+      ),
+    ),
+    'recipes_inspect' => array(
+      'render element' => 'page',
+      'file' => 'recipes.theme.inc',
+      'attached' => array(
+        'css' => array(
+          backdrop_get_path('module', 'recipes') . '/css/recipes.admin.css' => array(),
+        ),
+      ),
     ),
   );
 }
 
 /**
- * Retrieves a single action's info by its name, or all actions
+ * Implements hook_theme_registry_alter().
+ */
+function recipes_theme_registry_alter(&$theme_registry) {
+  $theme_registry['confirm_form']['attached']['css'][backdrop_get_path('module', 'recipes') . '/css/recipes.admin.css'] = array();
+}
+
+/**
+ * Magic loader: Loads recipe information by its signature. If the signature
+ * starts with 'rollback|', it indicates a rollback recipe and is loaded from
+ * the rollback configuration.
+ *
+ * @param $signature
+ *   The unique signature of the recipe to load.
+ * @param array $system_info
+ *   An array containing system information as generated by
+ *   _recipes_get_system_info(), or an empty array if not provided.
+ *
+ * @return array|bool
+ *   The recipe information, or FALSE if not found.
+ */
+function recipes_load(string $signature, array $system_info = array()) {
+  if (strpos($signature, 'rollback|') === 0) {
+    return recipes_rollback_load($signature, $system_info);
+  }
+  $recipe = recipes_load_multiple(array($signature), $system_info);
+  return $recipe[$signature] ?? FALSE;
+}
+
+/**
+ * Discover all recipes from enabled themes and modules.
+ *
+ * @param array $requested_recipes
+ *   An optional array of recipes to load. If empty, all recipes will be loaded.
+ * @param array $system_info
+ *   An array containing system information as generated by
+ *   _recipes_get_system_info(), or an empty array if not provided.
+ *
+ * @return array
+ *   An array of all available or requested recipes. Keyed by the signature
+ *   "project-type:project-name:name", each entry contains the following
+ *   keys:
+ *   - project-type: The type of project (e.g., module, theme).
+ *   - project-name: The name of the project.
+ *   - name: The name of the recipe.
+ *   - path: The path to the template file relative to the Backdrop root.
+ *   - status: The status of the recipe (e.g., available, unavailable, changed).
+ *   - signature: The unique signature of the recipe, typically in the format
+ *     "project-type:project-name:name".
+ */
+function recipes_load_multiple(array $requested_recipes = array(), array $system_info = array()) {
+  $recipes = &backdrop_static(__FUNCTION__, array());
+  if (empty($recipes)) {
+    $recipe_config_keys = array(
+      'name',
+      'version',
+      'label',
+      'description',
+      'project-type',
+      'project-name',
+      'group',
+      'dependencies',
+      'overrides',
+    );
+    // Initialize system info.
+    if (empty($system_info)) {
+      $system_info = _recipes_get_system_info();
+    }
+    $paths = array();
+    foreach ($system_info['module'] as $module_name => $module) {
+      if (!empty($module->status)) {
+        $paths['module'][$module_name] = backdrop_get_path('module', $module_name);
+      }
+    }
+    foreach ($system_info['theme'] as $theme) {
+      if (!empty($theme->status)) {
+        $paths['theme'][$theme->name] = backdrop_get_path('theme', $theme->name);
+      }
+    }
+    foreach ($paths as $project_type => $path_list) {
+      foreach ($path_list as $project_name => $path) {
+        if (is_dir($path)) {
+          if (is_dir($path . '/recipes')) {
+            // Scan directory for recipe directories.
+            $recipe_dirs = scandir($path . '/recipes');
+            foreach ($recipe_dirs as $recipe_name) {
+              $recipe_path = $path . '/recipes/' . $recipe_name;
+              if ($recipe_name === '.' || $recipe_name === '..') {
+                continue;
+              }
+              if (is_file($recipe_path . '/' . $recipe_name . '.json')) {
+                $signature = $project_type . ':' . $project_name . ':' . $recipe_name;
+                $recipe_config = json_decode(file_get_contents($recipe_path . '/' . $recipe_name . '.json'), TRUE);
+                // Basic validation of recipe definition.
+                if (empty($recipe_config) || !is_array($recipe_config)) {
+                  continue;
+                }
+                if (empty($recipe_config['project-name']) || empty($recipe_config['project-type']) || empty($recipe_config['name'])) {
+                  continue;
+                }
+                foreach ($recipe_config_keys as $setting_name) {
+                  $recipes[$signature][$setting_name] = $recipe_config[$setting_name] ?? NULL;
+                }
+                $recipes[$signature] += array(
+                  'signature' => $signature,
+                  'path' => $recipe_path,
+                );
+              }
+            }
+          }
+        }
+      }
+    }
+    $system_info['recipe'] = $recipes;
+    foreach ($recipes as $signature => $implementation) {
+      // $recipes[$signature]['status'] = recipes_get_status($implementation);
+    }
+  }
+  if (!empty($requested_recipes)) {
+    // Return only the recipes that are in the $requested_recipes array.
+    $filtered_recipes = array();
+    foreach ($requested_recipes as $requested_recipe) {
+      if (isset($recipes[$requested_recipe])) {
+        $filtered_recipes[$requested_recipe] = $recipes[$requested_recipe];
+      }
+    }
+    return $filtered_recipes;
+  }
+  else {
+    return $recipes;
+  }
+}
+
+/**
+ * Load a saved rollback recipe.
+ *
+ * @param $signature
+ *   The unique signature of the recipe to load from rollback config.
+ * @param array $system_info
+ *   An array containing system information as generated by
+ *   _recipes_get_system_info(), or an empty array if not provided.
+ *
+ * @return array|bool
+ *   The recipe information, or FALSE if not found.
+ */
+function recipes_rollback_load(string $signature, array $system_info = array()) {
+  $recipe = array();
+  $rollback_config_name = substr($signature, strlen('rollback|'));
+  $rollback_config_name = 'recipes.rollback.' . str_replace(':', '.', $rollback_config_name);
+  $rollback_recipe = config($rollback_config_name)->get();
+  $recipe[$signature] = $rollback_recipe ?? FALSE;
+  return $recipe[$signature];
+}
+
+/**
+ * Gather and check dependencies for a particular recipe, returning the current
+ * status of the recipe.
+ *
+ * @param string $signature
+ *   The recipe signature.
+ *
+ * @return array
+ *   The status of this recipe based on all dependencies (including nested
+ *   dependencies) and any bundled config. Valid status results:
+ *     - RECIPES_STATUS_INSTALLED: The recipe is already installed and config
+ *       matches.
+ *     - RECIPES_STATUS_CHANGED: The recipe is installed but its configuration
+ *       has changed.
+ *     - RECIPES_STATUS_AVAILABLE: All dependencies are met and the recipe can
+ *       be installed.
+ *     - RECIPES_STATUS_UNAVAILABLE: Not installed and some dependencies are
+ *       missing or broken.
+ */
+function recipes_get_status(string $signature) {
+  $status = &backdrop_static(__FUNCTION__ . ':' . $signature, array());
+  if (!empty($status)) {
+    return $status;
+  }
+  $recipe = recipes_load($signature);
+  if (empty($recipe)) {
+    return array(
+      'key' => RECIPES_STATUS_UNAVAILABLE,
+      'messages' => array(t('Recipe not found.')),
+    );
+  }
+  $status = array(
+    'key' => RECIPES_STATUS_AVAILABLE,
+    'messages' => array(),
+  );
+  $status = array(
+    'key' => RECIPES_STATUS_AVAILABLE,
+    'messages' => array(),
+  );
+  $recipe_is_active = recipes_is_active($signature);
+  // Check if the recipe is installed.
+  if ($recipe_is_active) {
+    $status['key'] = RECIPES_STATUS_INSTALLED;
+    $recipe_installed = TRUE;
+  }
+  else {
+    $recipe_installed = FALSE;
+  }
+  // Check if any bundled configuration has changed.
+  $config_status = _recipes_do('check', 'config', $signature);
+  // Check dependencies of the recipe.
+  $dependencies_status = _recipes_do('check', 'dependencies', $signature);
+
+  // Check config and state overrides.
+  $overrides_status = _recipes_do('check', 'overrides', $signature);
+
+  // Compile status results.
+  $status_results = array(
+    $config_status['key'],
+    $dependencies_status['key'],
+    $overrides_status['key'],
+    $status['key'],
+  );
+  // Determine the highest priority status.
+  if (in_array(RECIPES_STATUS_UNAVAILABLE, $status_results)) {
+    $status['key'] = RECIPES_STATUS_UNAVAILABLE;
+  }
+  elseif (in_array(RECIPES_STATUS_CHANGED, $status_results) && $recipe_is_active) {
+    $status['key'] = RECIPES_STATUS_CHANGED;
+  }
+  elseif (in_array(RECIPES_STATUS_INSTALLED, $status_results) && $recipe_is_active) {
+    $status['key'] = RECIPES_STATUS_INSTALLED;
+  }
+  else {
+    $status['key'] = RECIPES_STATUS_AVAILABLE;
+  }
+  $status['messages'] = array_merge(
+    $config_status['messages'] ?? array(),
+    $dependencies_status['messages'] ?? array(),
+    $overrides_status['messages'] ?? array()
+  );
+  return $status;
+}
+
+/**
+ * Apply a recipe.
+ *
+ * @param string $signature
+ *   The signature of the recipe to apply.
+ * @param bool $force
+ *   Whether to force apply the recipe, overwriting existing configuration if
+ *   needed.
+ */
+function recipes_apply_recipe(string $signature, bool $force = FALSE) {
+  $status = recipes_get_status($signature);
+  // Bail out if the dependencies are not met.
+  if ($status['key'] === RECIPES_STATUS_UNAVAILABLE) {
+    backdrop_set_message(t('The <em>%recipe</em> recipe cannot be applied at the moment, please review the dependencies.', array('%recipe' => $signature)), 'error');
+    backdrop_goto('admin/structure/recipes');
+  }
+
+  $recipe = recipes_load($signature);
+  $rollback_name = 'recipes.rollback.' . str_replace(':', '.', $signature);
+  $rollback_recipe = array(
+    'name' => $rollback_name,
+    'label' => 'Rollback recipe for ' . $signature,
+    'generated' => date('Y-m-d H:i:s'),
+    'signature' => $recipe['signature'] ? 'rollback|' . $recipe['signature'] : '',
+    'path' => $recipe['path'] ?? '',
+    'config' => array(),
+    'dependencies' => array(),
+    'overrides' => array(),
+  );
+  // Apply dependencies.
+  $rollback_recipe['dependencies'] += _recipes_do('apply', 'dependencies', $recipe['signature']);
+
+  // Import the fresh configuration provided by the recipe.
+  if (!$force) {
+    $rollback_recipe['config'] += _recipes_do('apply', 'config', $signature);
+  }
+  else {
+    $rollback_recipe['config'] += _recipes_apply__config($signature, _recipes_get_system_info(), $force);
+  }
+
+  // Finally, apply configuration overrides if any.
+  $rollback_recipe['overrides'] += _recipes_do('apply', 'overrides', $signature);
+
+  recipes_mark_active($signature);
+  if (!empty($rollback_recipe['config']) || !empty($rollback_recipe['dependencies']) || !empty($rollback_recipe['overrides'])) {
+    $rollback_config = config($rollback_name);
+    $rollback_config->setData($rollback_recipe);
+    $rollback_config->save();
+  }
+
+  // Set a message.
+  $message = 'The <em>%recipe</em> has been applied to this site.';
+  $replacements = array('%recipe' => $recipe['label'] ?? $recipe['name']);
+  backdrop_set_message(t($message, $replacements));
+}
+
+/**
+ * Rollback a recipe.
+ *
+ * @param string $signature
+ *   The signature of the recipe to rollback.
+ */
+function recipes_rollback_recipe(string $signature) {
+  $rollback_name = 'recipes.rollback.' . str_replace(':', '.', $signature);
+  $rollback_config = config($rollback_name);
+  if (!$rollback_config->isNew()) {
+    $rollback_recipe = $rollback_config->get();
+
+    // Rollback dependencies.
+    if (!empty($rollback_recipe['dependencies'])) {
+      _recipes_do('rollback', 'dependencies', $signature);
+    }
+
+    // Rollback configuration.
+    if (!empty($rollback_recipe['config'])) {
+      _recipes_do('rollback', 'config', $signature);
+    }
+
+    // Rollback overrides.
+    if (!empty($rollback_recipe['overrides'])) {
+      _recipes_do('rollback', 'overrides', $signature);
+    }
+  }
+  recipes_mark_inactive($signature);
+}
+
+/**
+ * Implements hook_recipes_action_info().
+ */
+function recipes_recipes_action_info() {
+  $operations = array(
+    'inspect' => array(
+      'label' => t('View'),
+      'callback' => 'recipes_inspect_form',
+      'permission' => array('inspect recipes'),
+      'file' => 'recipes.actions.inc',
+    ),
+    'apply' => array(
+      'label' => t('Apply'),
+      'callback' => 'recipes_apply_form',
+      'requirements_callback' => 'recipes_requirements_can_be_applied',
+      'permission' => array('manage recipes'),
+      'file' => 'recipes.actions.inc',
+    ),
+    'force' => array(
+      'label' => t('Force apply'),
+      'callback' => 'recipes_force_apply_form',
+      'requirements_callback' => 'recipes_requirements_is_changed',
+      'permission' => array('manage recipes'),
+      'file' => 'recipes.actions.inc',
+    ),
+    'detach' => array(
+      'label' => t('Detach'),
+      'callback' => 'recipes_detach_form',
+      'requirements_callback' => 'recipes_requirements_has_been_applied',
+      'permission' => array('manage recipes'),
+      'file' => 'recipes.actions.inc',
+    ),
+    'rollback' => array(
+      'label' => t('Rollback'),
+      'callback' => 'recipes_rollback_form',
+      'requirements_callback' => 'recipes_requirements_has_rollback',
+      'permission' => array('manage recipes'),
+      'file' => 'recipes.actions.inc',
+    ),
+  );
+
+  return $operations;
+}
+
+/**
+ * Retrieves a single action's info by its name, or all actions if no name is
+ * provided.
  *
  * @param (string) $action
  *   The key of the recipe action to retrieve.
+ *
+ * @return array|bool
+ *   The action info array if found, all actions if no name is provided, or
+ *   FALSE if the action does not exist.
  */
 function recipes_actions_get_info($action = NULL) {
   $actions = &backdrop_static(__FUNCTION__);
@@ -105,7 +538,7 @@ function recipes_actions_get_info($action = NULL) {
       }
     }
     backdrop_alter('recipes_action_info', $actions);
-    //backdrop_sort($actions);
+    // backdrop_sort($actions);
   }
 
   if (!isset($action)) {
@@ -127,77 +560,113 @@ function recipes_requirements_true() {
 }
 
 /**
- * Requirements callback: Requires the module to be enabled.
+ * Requirements callback: Requires the recipe to be applied. This includes
+ * if it was applied and then some dependencies were later changed.
  *
- * @param string $module
- *   Machine name of the recipe module this action is to be performed on.
- *
- * @return bool
- */
-function recipes_requirements_module_enabled($module) {
-  if (module_exists($module)) {
-    return TRUE;
-  }
-  return FALSE;
-}
-
-/**
- * Requirements callback: Requires the module to be disabled.
- *
- * @param string $module
- *   Machine name of the recipe module this action is to be performed on.
+ * @param array $recipe
+ *   Recipe implementation array, containing the signature and other metadata.
  *
  * @return bool
  */
-function recipes_requirements_module_disabled($module) {
-  if (module_exists($module)) {
-    return FALSE;
-  }
-  return TRUE;
+function recipes_requirements_has_been_applied(array $recipe) {
+  $recipe_status = recipes_get_status($recipe['signature']);
+  return ($recipe_status['key'] == RECIPES_STATUS_INSTALLED || $recipe_status['key'] == RECIPES_STATUS_CHANGED);
 }
 
 /**
- * Implements hook_recipes_action_info().
+ * Requirements callback: Requires the recipe to have a rollback available.
+ *
+ * @param array $recipe
+ *   Recipe implementation array, containing the signature and other metadata.
+ *
+ * @return bool
  */
-function recipes_recipes_action_info() {
-  $operations = array(
-    'import' => array(
-      'label' => 'Enable',
-      'callback' => 'recipes_import_form',
-      'requirements_callback' => 'recipes_requirements_module_disabled',
-      'permission' => array('manage recipes'),
-      'file' => 'recipes.actions.inc',
-    ),
-    'inspect' => array(
-      'label' => t('View'),
-      'callback' => 'recipes_inspect_form',
-      'permission' => array('manage recipes'),
-      'file' => 'recipes.actions.inc',
-    ),
-    'revert' => array(
-      'label' => 'Revert',
-      'callback' => 'recipes_revert_form',
-      'requirements_callback' => 'recipes_requirements_module_enabled',
-      'permission' => array('manage recipes'),
-      'file' => 'recipes.actions.inc',
-    ),
-    'remove' => array(
-      'label' => t('Uninstall'),
-      //'label' => t('Remove'),
-      'callback' => 'recipes_remove_form',
-      'requirements_callback' => 'recipes_requirements_module_enabled',
-      'permission' => array('manage recipes'),
-      'file' => 'recipes.actions.inc',
-    ),
-    /*
-    'export' => array(
-      'label' => t('Export / Extract'),
-      'callback' => 'recipes_export_form',
-      'requirements_callback' => 'recipes_requirements_module_enabled',
-      'permission' => array('manage recipes'),
-      'file' => 'recipes.actions.inc',
-    ),*/
-  );
+function recipes_requirements_has_rollback(array $recipe) {
+  $recipe_status = recipes_get_status($recipe['signature']);
+  $rollback_name = 'recipes.rollback.' . str_replace(':', '.', $recipe['signature']);
+  $rollback_config = config($rollback_name);
+  return (!$rollback_config->isNew() && ($recipe_status['key'] == RECIPES_STATUS_INSTALLED || $recipe_status['key'] == RECIPES_STATUS_CHANGED));
+}
 
-  return $operations;
+/**
+ * Requirements callback: Requires the recipe to not have been applied.
+ *
+ * @param array $recipe
+ *   Recipe implementation array, containing the signature and other metadata.
+ *
+ * @return bool
+ */
+function recipes_requirements_has_not_been_applied(array $recipe) {
+  $recipe_status = recipes_get_status($recipe['signature']);
+  return ($recipe_status['key'] != RECIPES_STATUS_INSTALLED && $recipe_status['key'] != RECIPES_STATUS_CHANGED);
+}
+
+/**
+ * Requirements callback: Requires the recipe to be applied and have some of the
+ * dependencies changed, or to be available but not have been applied yet. This
+ * can determine whether the recipe can be applied or re-applied.
+ *
+ * @param array $recipe
+ *   Recipe implementation array, containing the signature and other metadata.
+ *
+ * @return bool
+ */
+function recipes_requirements_can_be_applied(array $recipe) {
+  $recipe_status = recipes_get_status($recipe['signature']);
+  return ($recipe_status['key'] == RECIPES_STATUS_CHANGED || $recipe_status['key'] == RECIPES_STATUS_AVAILABLE);
+}
+
+/**
+ * Requirements callback: Requires the recipe to be applied and have some of the
+ * dependencies changed.
+ *
+ * @param array $recipe
+ *   Recipe implementation array, containing the signature and other metadata.
+ *
+ * @return bool
+ */
+function recipes_requirements_is_changed(array $recipe) {
+  $recipe_status = recipes_get_status($recipe['signature']);
+  return ($recipe_status['key'] == RECIPES_STATUS_CHANGED);
+}
+
+/**
+ * Set a recipe as installed.
+ */
+function recipes_mark_active($recipe_signature) {
+  $recipes_installed = config('recipes.installed');
+  $active_recipes = $recipes_installed->get('active');
+  if (!in_array($recipe_signature, $active_recipes)) {
+    $active_recipes[$recipe_signature] = time();
+    $recipes_installed->set('active', $active_recipes);
+    $recipes_installed->save();
+  }
+}
+
+/**
+ * Set a recipe as inactive.
+ */
+function recipes_mark_inactive($recipe_signature) {
+  // Mark the recipe as inactive in the active recipes list.
+  $recipes_installed = config('recipes.installed');
+  $active_recipes = $recipes_installed->get('active');
+  if (isset($active_recipes[$recipe_signature])) {
+    unset($active_recipes[$recipe_signature]);
+    $recipes_installed->set('active', $active_recipes);
+    $recipes_installed->save();
+  }
+  // Remove the rollback configuration, if any.
+  $rollback_name = 'recipes.rollback.' . str_replace(':', '.', $recipe_signature);
+  $rollback_config = config($rollback_name);
+  if (!$rollback_config->isNew()) {
+    $rollback_config->delete();
+  }
+}
+
+/**
+ * Check whether a recipe is active.
+ */
+function recipes_is_active($recipe_signature) {
+  $active_recipes = config_get('recipes.installed', 'active');
+  return isset($active_recipes[$recipe_signature]);
 }
