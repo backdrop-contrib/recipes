@@ -238,6 +238,9 @@ function recipes_load_multiple(array $requested_recipes = array(), array $system
                 if (empty($recipe_config) || !is_array($recipe_config)) {
                   continue;
                 }
+                if ($project_type !== $recipe_config['project-type'] || $project_name !== $recipe_config['project-name']) {
+                  continue;
+                }
                 if (empty($recipe_config['project-name']) || empty($recipe_config['project-type']) || empty($recipe_config['name'])) {
                   continue;
                 }
